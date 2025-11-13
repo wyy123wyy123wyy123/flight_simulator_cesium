@@ -1,0 +1,3488 @@
+--- File: vite.config.js ---
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import cesium from 'vite-plugin-cesium'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react(), cesium()],
+})
+
+
+--- End of File: vite.config.js ---
+
+--- File: eslint.config.js ---
+
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import { defineConfig, globalIgnores } from 'eslint/config'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{js,jsx}'],
+    extends: [
+      js.configs.recommended,
+      reactHooks.configs['recommended-latest'],
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        ecmaFeatures: { jsx: true },
+        sourceType: 'module',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+    },
+  },
+])
+
+
+--- End of File: eslint.config.js ---
+
+--- File: src/main.jsx ---
+
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.jsx'
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+
+
+--- End of File: src/main.jsx ---
+
+--- File: src/App.jsx ---
+
+import { CesiumViewer } from './components';
+
+function App() {
+  return (
+    <>
+      <CesiumViewer />
+    </>
+  );
+}
+
+export default App;
+
+
+--- End of File: src/App.jsx ---
+
+--- File: src/components/index.jsx ---
+
+export { default as CesiumViewer } from './CesiumViewer';
+export { default as FlightControls } from './FlightControls';
+export { default as AircraftSelector } from './AircraftSelector';
+export { default as GlobalViewToggle } from './GlobalViewToggle';
+export { default as EnterPrompt } from './EnterPrompt';
+export { default as AttitudeIndicator } from './AttitudeIndicator';
+export { default as RadarMap } from './RadarMap';
+export { default as InstrumentPanel } from './InstrumentPanel';
+export { default as WaypointControl } from './WaypointControl';
+export { default as WaypointNavigation } from './WaypointNavigation';
+export { default as LoadingScreen } from './LoadingScreen';
+
+--- End of File: src/components/index.jsx ---
+
+--- File: src/components/FlightControls/index.jsx ---
+
+// src/components/FlightControls/index.jsx
+
+import { useEffect, useState } from 'react';
+import * as Cesium from 'cesium';
+import { CoordinateConverter } from '../../helpers/CoordinateConverter';
+
+const FlightControls = ({ flightData, isAutoFlying, isAutoFlightPaused }) => {
+    if (!flightData) return null;
+
+    const { speed, position, heading, pitch, roll, status } = flightData;
+    const cartographic = position ? Cesium.Cartographic.fromCartesian(position) : null;
+    const altitude = cartographic ? Math.round(cartographic.height) : 0;
+    
+    // 将Cesium heading（东方0度）转换为航空方位角（北方0度）
+    const headingDeg = CoordinateConverter.cesiumHeadingToBearing(
+        Cesium.Math.toDegrees(heading)
+    );
+
+    const [crashTextColor, setCrashTextColor] = useState('orange');
+
+    useEffect(() => {
+        if (status?.isCrashed) {
+            const interval = setInterval(() => {
+                setCrashTextColor(prev => prev === 'orange' ? 'purple' : 'orange');
+            }, 500);
+
+            return () => clearInterval(interval);
+        }
+    }, [status?.isCrashed]);
+
+    
+    return (
+        <div style={containerStyle}>
+            <h3 style={headerStyle}>飞行数据</h3>
+            
+            <div style={{ display: 'grid', gap: '10px' }}>
+                <DataRow label="速度" value={`${Math.round(speed * 3.6)} km/h`} />
+                <DataRow label="经度" value={`${(Cesium.Math.toDegrees(cartographic.longitude)).toFixed(6)}°`} />
+                <DataRow label="纬度" value={`${(Cesium.Math.toDegrees(cartographic.latitude)).toFixed(6)}°`} />
+                <DataRow label="高度" value={`${altitude} m`} />
+                <DataRow label="航向" value={`${Math.round(headingDeg)}°`} />
+                <DataRow label="俯仰" value={`${Math.round(Cesium.Math.toDegrees(pitch))}°`} />
+                <DataRow label="翻滚" value={`${Math.round(Cesium.Math.toDegrees(roll))}°`} />
+            </div>
+
+            {(status && (status.isStalled || status.isSupersonic || status.isCrashed) || isAutoFlying) &&
+                <div style={statusContainerStyle}>
+                    {isAutoFlying && !isAutoFlightPaused && <div style={{ color: 'cyan', fontWeight: 'bold' }}>自动驾驶已启动</div>}
+                    {isAutoFlying && isAutoFlightPaused && <div style={{ color: 'yellow', fontWeight: 'bold' }}>自动驾驶已暂停 (手动控制)</div>}
+                    {status.isCrashed && <div style={{ color: crashTextColor, fontWeight: 'bold' }}>MAN! WHAT CAN I SAY?</div>}
+                    {status.isStalled && <div style={{ color: 'red', fontWeight: 'bold' }}>失速警告!</div>}
+                    {status.isSupersonic && <div style={{ color: 'cyan', fontWeight: 'bold' }}>音爆!</div>}
+                </div>
+            }
+            
+            {(!isAutoFlying || isAutoFlightPaused) && (
+                <div style={controlsInfoStyle}>
+                    <div><strong>控制说明:</strong></div>
+                    <div>W/S: 俯冲/抬升 | A/D: 左滚/右滚</div>
+                    <div>Q/E: 左转/右转 | Shift/Ctrl: 加速/减速</div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const containerStyle = {
+    position: 'absolute', top: '20px', left: '20px',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)', color: '#00ff00',
+    padding: '20px', borderRadius: '10px', fontFamily: 'monospace',
+    fontSize: '14px', zIndex: 1000, minWidth: '250px'
+};
+const headerStyle = {
+    margin: '0 0 15px 0', color: '#00ff00',
+    borderBottom: '2px solid #00ff00', paddingBottom: '10px'
+};
+const statusContainerStyle = {
+    marginTop: '15px', paddingTop: '10px',
+    borderTop: '1px dashed #555'
+};
+const controlsInfoStyle = {
+    marginTop: '20px', paddingTop: '15px',
+    borderTop: '1px solid #00ff00', fontSize: '12px', color: '#88ff88'
+};
+
+const DataRow = ({ label, value }) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ color: '#88ff88' }}>{label}:</span>
+        <span style={{ fontWeight: 'bold', fontSize: '16px' }}>{value}</span>
+    </div>
+);
+
+
+export default FlightControls;
+
+--- End of File: src/components/FlightControls/index.jsx ---
+
+--- File: src/components/CesiumViewer/index.jsx ---
+
+// components/CesiumViewer/index.jsx
+
+import * as Cesium from "cesium";
+import "cesium/Build/Cesium/Widgets/widgets.css";
+import { useEffect, useRef, useState } from "react";
+import { FlightSimulator } from "../../helpers/FlightSimulator";
+import { AIRCRAFT_LIST } from "../../config/aircraftConfig";
+import { WaypointManager } from "../../helpers/WaypointManager";
+
+import {
+    FlightControls,
+    AircraftSelector,
+    GlobalViewToggle,
+    EnterPrompt,
+    InstrumentPanel,
+    WaypointControl,
+    WaypointNavigation,
+    LoadingScreen
+} from '../index';
+
+Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN;
+
+function CesiumViewer() {
+    const cesiumContainerRef = useRef(null);
+    const simulatorRef = useRef(null);
+    const [viewer, setViewer] = useState(null);
+    const [flightData, setFlightData] = useState(null);
+    const [currentAircraftId, setCurrentAircraftId] = useState(null);
+    const [viewMode, setViewMode] = useState('FLIGHT');
+    const [showPrompt, setShowPrompt] = useState(true);
+    const [audioReady, setAudioReady] = useState(false);
+
+    const [waypointManager, setWaypointManager] = useState(null);
+    const [isNavigating, setIsNavigating] = useState(false);
+    const [waypoints, setWaypoints] = useState([]);
+
+    useEffect(() => {
+        if (!cesiumContainerRef.current) return;
+
+        let viewer;
+        let simulator;
+        let handler;
+        let manager;
+        let isMounted = true;
+
+        const init = async () => {
+            try {
+                viewer = new Cesium.Viewer(cesiumContainerRef.current, {
+                    terrain: Cesium.Terrain.fromWorldTerrain(),
+                    infoBox: false, geocoder: false, homeButton: false,
+                    sceneModePicker: false, baseLayerPicker: false,
+                    navigationHelpButton: false, animation: false,
+                    timeline: true, fullscreenButton: false,
+                    vrButton: false, selectionIndicator: false,
+                    shadows: true, shouldAnimate: true,
+                    targetFrameRate: 60
+                });
+
+                if (isMounted) setViewer(viewer);
+                
+                viewer._cesiumWidget._creditContainer.style.display = "none";
+                viewer.scene.globe.depthTestAgainstTerrain = true;
+                viewer.scene.globe.enableLighting = true;
+
+                const google_sat = await Cesium.IonImageryProvider.fromAssetId(3830182);
+                google_sat.dayAlpha = 0.0;
+                google_sat.nightAlpha = 1.0;
+                viewer.imageryLayers.addImageryProvider(google_sat);
+                const osm_building = await Cesium.Cesium3DTileset.fromIonAssetId(96188);
+                viewer.scene.primitives.add(osm_building);
+
+                if (!isMounted) return;
+
+                manager = new WaypointManager(viewer);
+                if (isMounted) setWaypointManager(manager);
+
+                simulator = new FlightSimulator(viewer, manager);
+                simulatorRef.current = simulator;
+
+                simulator.on('audioLoaded', () => isMounted && setAudioReady(true));
+                simulator.on('audioUnlocked', () => isMounted && setShowPrompt(false));
+
+                const onFlightDataUpdate = (data) => {
+                    if (isMounted) {
+                        setFlightData({ ...data });
+                    }
+                };
+                simulator.on('flightDataUpdate', onFlightDataUpdate);
+
+                handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+                handler.setInputAction(async (movement) => {
+                    if (simulatorRef.current && simulatorRef.current.viewMode === 'GLOBAL') {
+                        const cartesian = viewer.scene.pickPosition(movement.position);
+                        if (Cesium.defined(cartesian)) {
+                            await simulatorRef.current.relocateAircraft(cartesian);
+                            setViewMode('FLIGHT');
+                        }
+                    }
+                }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+                
+                const defaultAircraft = AIRCRAFT_LIST[0];
+                const initialLon = 121.47, initialLat = 31.23, initialAgl = 1500;
+                const initialCartographic = Cesium.Cartographic.fromDegrees(initialLon, initialLat);
+
+                const [updatedInitialCarto] = await simulator.getUpdatedCartographicsWithTerrainHeight([initialCartographic]);
+                updatedInitialCarto.height += initialAgl;
+                const initialPosition = Cesium.Cartographic.toCartesian(updatedInitialCarto);
+
+                simulator.loadAircraft(defaultAircraft, initialPosition, Cesium.Math.toRadians(-90));
+                setCurrentAircraftId(defaultAircraft.id);
+                
+            } catch (error) {
+                console.error("Failed to initialise Cesium viewer:", error);
+            }
+        };
+
+        init();
+
+        return () => {
+            isMounted = false;
+            if (handler) handler.destroy();
+            if (manager) manager.destroy();
+            if (simulator) simulator.destroy();
+            if (viewer) viewer.destroy();
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!waypointManager) return;
+
+        const updateWaypoints = () => {
+            setWaypoints(waypointManager.getWaypoints());
+        };
+
+        const handleNavigationCompleted = () => {
+            console.log('Navigation mission accomplished!');
+            setIsNavigating(false);
+        };
+
+        updateWaypoints();
+
+        waypointManager.on('waypointAdded', updateWaypoints);
+        waypointManager.on('waypointRemoved', updateWaypoints);
+        waypointManager.on('waypointsCleared', updateWaypoints);
+        waypointManager.on('waypointReached', updateWaypoints);
+        waypointManager.on('navigationCompleted', handleNavigationCompleted);
+
+        return () => {
+            waypointManager.off('waypointAdded', updateWaypoints);
+            waypointManager.off('waypointRemoved', updateWaypoints);
+            waypointManager.off('waypointsCleared', updateWaypoints);
+            waypointManager.off('waypointReached', updateWaypoints);
+            waypointManager.off('navigationCompleted', handleNavigationCompleted);
+        };
+    }, [waypointManager]);
+
+
+    const handleAudioUnlock = async () => {
+        if (simulatorRef.current) {
+            await simulatorRef.current.unlockAudio();
+            simulatorRef.current.start();
+        }
+    };
+
+    const handleAircraftSelect = (aircraftConfig) => {
+        if (simulatorRef.current && currentAircraftId !== aircraftConfig.id) {
+            const prev = simulatorRef.current.currentAircraft.state;
+            const currentPosition = Cesium.Cartesian3.clone(prev.position);
+            const currentOrientation = Cesium.Quaternion.clone(prev.orientation);
+
+            simulatorRef.current.loadAircraft(
+                aircraftConfig,
+                currentPosition,
+                undefined,
+                currentOrientation
+            );
+            setCurrentAircraftId(aircraftConfig.id);
+        }
+    };
+
+    const handleToggleViewMode = () => {
+        const newMode = viewMode === 'FLIGHT' ? 'GLOBAL' : 'FLIGHT';
+        if (simulatorRef.current) {
+            simulatorRef.current.setViewMode(newMode);
+            setViewMode(newMode);
+        }
+    };
+
+    const handleNavigationStart = () => setIsNavigating(true);
+    const handleNavigationStop = () => setIsNavigating(false);
+
+    return (
+        <div style={{ width: '100%', height: '100vh', position: 'relative' }}>
+            {!audioReady && <LoadingScreen />}
+
+            <div ref={cesiumContainerRef} style={{ width: '100%', height: '100%' }} />
+            
+            {isNavigating && flightData?.navigationData && (
+                <WaypointNavigation
+                    navigationData={flightData.navigationData}
+                    flightData={flightData}
+                />
+            )}
+
+            {showPrompt && audioReady && (
+                <EnterPrompt onUnlock={handleAudioUnlock} />
+            )}
+
+            {!showPrompt && (
+                <>
+                    <FlightControls flightData={flightData} />
+                    <AircraftSelector onSelect={handleAircraftSelect} currentAircraftId={currentAircraftId} />
+                    <GlobalViewToggle viewMode={viewMode} onToggle={handleToggleViewMode} />
+                    <InstrumentPanel flightData={flightData} waypoints={waypoints} />
+                    {waypointManager && (
+                        <WaypointControl
+                            waypointManager={waypointManager}
+                            isNavigating={isNavigating}
+                            onNavigationStart={handleNavigationStart}
+                            onNavigationStop={handleNavigationStop}
+                            viewer={viewer}
+                        />
+                    )}
+                </>    
+            )}
+        </div>
+    );
+}
+
+export default CesiumViewer;
+
+--- End of File: src/components/CesiumViewer/index.jsx ---
+
+--- File: src/components/RadarMap/index.jsx ---
+
+// components/RadarMap/index.jsx
+
+import { useEffect, useRef } from 'react';
+import * as Cesium from 'cesium';
+
+import { CoordinateConverter } from '../../helpers/CoordinateConverter';
+
+const RadarMap = ({ position, heading, terrainData, landmarks, waypoints }) => {
+    const canvasRef = useRef(null);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !position) return;
+
+        const ctx = canvas.getContext('2d');
+        const size = 200;
+        const centerX = size / 2;
+        const centerY = size / 2;
+        const mapRadius = size / 2 - 20;
+        const maxDisplayDistance = 50000;
+
+        ctx.clearRect(0, 0, size, size);
+        ctx.fillStyle = 'rgba(0, 20, 0, 0.9)';
+        ctx.fillRect(0, 0, size, size);
+
+        // 绘制雷达圈和十字线
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 1;
+        for (let i = 1; i <= 3; i++) {
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, (mapRadius / 3) * i, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY - mapRadius);
+        ctx.lineTo(centerX, centerY + mapRadius);
+        ctx.moveTo(centerX - mapRadius, centerY);
+        ctx.lineTo(centerX + mapRadius, centerY);
+        ctx.stroke();
+
+        // 绘制方向标记
+        ctx.fillStyle = '#00ff00';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // 将Cesium heading转换为航空bearing用于显示
+        const aircraftBearing = CoordinateConverter.cesiumHeadingToBearing(
+            Cesium.Math.toDegrees(heading)
+        );
+        
+        const directions = [
+            { label: 'N', angle: 0 }, 
+            { label: 'E', angle: 90 }, 
+            { label: 'S', angle: 180 }, 
+            { label: 'W', angle: 270 }
+        ];
+        
+        directions.forEach(dir => {
+            // 相对于飞机航向的角度差
+            const relativeAngle = (dir.angle - aircraftBearing + 360) % 360;
+            const angleRad = Cesium.Math.toRadians(relativeAngle);
+            const x = centerX + Math.sin(angleRad) * (mapRadius + 10);
+            const y = centerY - Math.cos(angleRad) * (mapRadius + 10);
+            ctx.fillText(dir.label, x, y);
+        });
+
+        const cartographic = Cesium.Cartographic.fromCartesian(position);
+
+        // 绘制航点
+        if (waypoints && waypoints.length > 0) {
+            const waypointScreenCoords = waypoints.map(wp => {
+                const distance = Cesium.Cartesian3.distance(position, wp.position);
+                if (distance >= maxDisplayDistance) return null;
+
+                // 计算航空方位角
+                const bearing = CoordinateConverter.calculateBearing(
+                    Cesium.Math.toDegrees(cartographic.longitude),
+                    Cesium.Math.toDegrees(cartographic.latitude),
+                    wp.longitude,
+                    wp.latitude
+                );
+                
+                // 计算相对方位角（目标方位 - 飞机航向）
+                const relativeBearing = (bearing - aircraftBearing + 360) % 360;
+                const relativeBearingRad = Cesium.Math.toRadians(relativeBearing);
+                const displayDistance = (distance / maxDisplayDistance) * mapRadius;
+                
+                return {
+                    x: centerX + Math.sin(relativeBearingRad) * displayDistance,
+                    y: centerY - Math.cos(relativeBearingRad) * displayDistance,
+                    waypoint: wp
+                };
+            });
+
+            // 绘制路径和航点标记
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            let firstPoint = true;
+            waypointScreenCoords.forEach(coord => {
+                if (coord) {
+                    if (firstPoint) {
+                        ctx.moveTo(coord.x, coord.y);
+                        firstPoint = false;
+                    } else {
+                        ctx.lineTo(coord.x, coord.y);
+                    }
+                }
+            });
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            waypointScreenCoords.forEach((coord, index) => {
+                if (coord) {
+                    const { x, y, waypoint } = coord;
+                    ctx.fillStyle = waypoint.reached ? '#00ff00' : '#ffff00';
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1;
+                    ctx.fillRect(x - 3, y - 3, 6, 6);
+                    ctx.strokeRect(x - 3, y - 3, 6, 6);
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = '10px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText((index + 1).toString(), x, y - 5);
+                }
+            });
+        }
+
+        // 绘制地标
+        if (landmarks && landmarks.length > 0) {
+            landmarks.forEach(landmark => {
+                const lmCartographic = Cesium.Cartographic.fromDegrees(landmark.longitude, landmark.latitude);
+                const distance = Cesium.Cartesian3.distance(
+                    position, 
+                    Cesium.Cartesian3.fromRadians(lmCartographic.longitude, lmCartographic.latitude, cartographic.height)
+                );
+                
+                if (distance < maxDisplayDistance) {
+                    const bearing = CoordinateConverter.calculateBearing(
+                        Cesium.Math.toDegrees(cartographic.longitude), 
+                        Cesium.Math.toDegrees(cartographic.latitude), 
+                        landmark.longitude, 
+                        landmark.latitude
+                    );
+                    
+                    const relativeBearing = (bearing - aircraftBearing + 360) % 360;
+                    const relativeBearingRad = Cesium.Math.toRadians(relativeBearing);
+                    const displayDistance = (distance / maxDisplayDistance) * mapRadius;
+                    const x = centerX + Math.sin(relativeBearingRad) * displayDistance;
+                    const y = centerY - Math.cos(relativeBearingRad) * displayDistance;
+                    
+                    ctx.fillStyle = landmark.color || '#ffff00';
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = landmark.color || '#ffff00';
+                    ctx.font = '10px monospace';
+                    ctx.fillText(landmark.name, x + 8, y);
+                }
+            });
+        }
+
+        // 绘制飞机图标、扫描线、边框
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.fillStyle = '#ff0000';
+        ctx.beginPath();
+        ctx.moveTo(0, -10); 
+        ctx.lineTo(-6, 8); 
+        ctx.lineTo(6, 8);
+        ctx.closePath(); 
+        ctx.fill();
+        ctx.restore();
+
+        const time = Date.now() % 2000;
+        const scanAngle = (time / 2000) * Math.PI * 2;
+        const gradient = ctx.createLinearGradient(
+            centerX, centerY, 
+            centerX + Math.cos(scanAngle) * mapRadius, 
+            centerY + Math.sin(scanAngle) * mapRadius
+        );
+        gradient.addColorStop(0, 'rgba(0, 255, 0, 0.3)');
+        gradient.addColorStop(1, 'rgba(0, 255, 0, 0)');
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.lineTo(
+            centerX + Math.cos(scanAngle) * mapRadius, 
+            centerY + Math.sin(scanAngle) * mapRadius
+        );
+        ctx.stroke();
+
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(1, 1, size - 2, size - 2);
+
+    }, [position, heading, terrainData, landmarks, waypoints]);
+
+    return (
+        <div style={containerStyle}>
+            <div style={labelStyle}>雷达/小地图</div>
+            <canvas 
+                ref={canvasRef} 
+                width={200} 
+                height={200}
+                style={canvasStyle}
+            />
+            <div style={scaleStyle}>
+                <div>距离刻度</div>
+                <div>外圈: ~50km</div>
+            </div>
+        </div>
+    );
+};
+
+const containerStyle = { backgroundColor: 'rgba(0, 0, 0, 0.7)', padding: '10px', borderRadius: '10px', border: '2px solid #00ff00' };
+const labelStyle = { color: '#00ff00', fontFamily: 'monospace', fontSize: '14px', fontWeight: 'bold', marginBottom: '5px', textAlign: 'center' };
+const canvasStyle = { display: 'block', border: '1px solid #00ff00', borderRadius: '5px' };
+const scaleStyle = { marginTop: '5px', color: '#00ff00', fontFamily: 'monospace', fontSize: '10px', textAlign: 'center' };
+
+export default RadarMap;
+
+--- End of File: src/components/RadarMap/index.jsx ---
+
+--- File: src/components/AircraftSelector/index.jsx ---
+
+// src/components/AircraftSelector/index.jsx
+
+import { AIRCRAFT_LIST } from '../../config/aircraftConfig';
+
+const selectorStyle = {
+    position: 'absolute',
+    top: '20px',
+    right: '20px',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: '10px',
+    borderRadius: '5px',
+    zIndex: 1000,
+};
+
+const buttonStyle = {
+    display: 'block',
+    width: '100%',
+    padding: '8px',
+    margin: '5px 0',
+    backgroundColor: '#333',
+    color: '#00ff00',
+    border: '1px solid #00ff00',
+    cursor: 'pointer',
+};
+
+const AircraftSelector = ({ onSelect, currentAircraftId, disabled }) => {
+    return (
+        <div style={selectorStyle}>
+            <h4 style={{ color: 'white', margin: '0 0 10px 0' }}>选择飞机</h4>
+            {AIRCRAFT_LIST.map(craft => (
+                <button
+                    key={craft.id}
+                    onClick={() => onSelect(craft)}
+                    disabled={disabled}
+                    style={{
+                        ...buttonStyle,
+                        backgroundColor: currentAircraftId === craft.id ? '#00ff00' : '#333',
+                        color: currentAircraftId === craft.id ? '#000' : '#00ff00',
+                        cursor: disabled ? 'not-allowed' : 'pointer',
+                        opacity: disabled ? 0.5 : 1,
+                    }}
+                >
+                    {craft.name}
+                </button>
+            ))}
+        </div>
+    );
+};
+
+export default AircraftSelector;
+
+--- End of File: src/components/AircraftSelector/index.jsx ---
+
+--- File: src/components/LoadingScreen/index.jsx ---
+
+// src/components/LoadingScreen/index.jsx
+
+const MESSAGE = "正在初始化...";
+
+const LoadingScreen = () => {
+    return (
+        <div style={overlayStyle}>
+            <div style={containerStyle}>
+                <div className="spinner" style={spinnerStyle}></div>
+                <h2 style={titleStyle}>Flight Simulator</h2>
+                <p style={messageStyle}>{MESSAGE}</p>
+            </div>
+        </div>
+    );
+};
+
+// 样式定义
+const overlayStyle = {
+    position: 'fixed',
+    inset: 0,
+    width: '100vw',
+    height: '100vh',
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10000,
+    backdropFilter: 'blur(5px)',
+    color: '#00ff00',
+    fontFamily: 'monospace',
+};
+
+const containerStyle = {
+    textAlign: 'center',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '20px',
+};
+
+const spinnerStyle = {
+    width: '60px',
+    height: '60px',
+    border: '5px solid rgba(0, 255, 0, 0.2)',
+    borderTopColor: '#00ff00',
+    borderRadius: '50%',
+};
+
+const titleStyle = {
+    fontSize: '28px',
+    margin: 0,
+    textShadow: '0 0 10px rgba(0, 255, 0, 0.7)',
+    letterSpacing: '2px',
+};
+
+const messageStyle = {
+    fontSize: '16px',
+    color: '#9ee89e',
+    margin: 0,
+    minHeight: '20px', // 防止文字切换时布局跳动
+    transition: 'opacity 0.5s ease-in-out',
+};
+
+export default LoadingScreen;
+
+--- End of File: src/components/LoadingScreen/index.jsx ---
+
+--- File: src/components/GlobalViewToggle/index.jsx ---
+
+// src/components/GlobalViewToggle/index.jsx
+
+const containerStyle = {
+    position: 'absolute',
+    bottom: '40px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 1000,
+    textAlign: 'center'
+};
+
+const buttonStyle = {
+    padding: '10px 20px',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    color: '#00ff00',
+    border: '2px solid #00ff00',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontFamily: 'monospace',
+    fontSize: '16px',
+    outline: 'none',
+    minWidth: '150px',
+    transition: 'background-color 0.2s, color 0.2s',
+};
+
+const tooltipStyle = {
+    color: 'white',
+    fontSize: '12px',
+    marginTop: '5px',
+    textShadow: '1px 1px 2px black'
+};
+
+const GlobalViewToggle = ({ viewMode, onToggle }) => {
+    return (
+        <div style={containerStyle}>
+            <button 
+                onClick={onToggle} 
+                style={buttonStyle}
+                onMouseOver={e => { e.currentTarget.style.backgroundColor = '#00ff00'; e.currentTarget.style.color = '#000'; }}
+                onMouseOut={e => { e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.7)'; e.currentTarget.style.color = '#00ff00'; }}
+            >
+                {viewMode === 'FLIGHT' ? '🌎 全球视图' : '✈️ 返回飞行'}
+            </button>
+            {viewMode === 'GLOBAL' && (
+                <div style={tooltipStyle}>
+                    双击地球表面以移动飞机至该位置
+                </div>
+            )}
+            {viewMode === 'FLIGHT' && (
+                <div style={tooltipStyle}>
+                    点击以移动到全球视角
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default GlobalViewToggle;
+
+--- End of File: src/components/GlobalViewToggle/index.jsx ---
+
+--- File: src/components/WaypointControl/index.jsx ---
+
+// src/components/WaypointControl/index.jsx
+
+import { useEffect, useState, useCallback } from 'react';
+import { LANDMARKS } from '../../config/landmarksConfig';
+import * as Cesium from 'cesium';
+
+const WaypointControl = ({ waypointManager, isNavigating, onNavigationStart, onNavigationStop, viewer, isAutoFlying }) => {
+    const [showPanel, setShowPanel] = useState(false);
+    const [waypoints, setWaypoints] = useState([]);
+    const [selectedLandmark, setSelectedLandmark] = useState('');
+    const [altitude, setAltitude] = useState(1000);
+    
+    const [manualInput, setManualInput] = useState({
+        name: '',
+        latitude: '',
+        longitude: '',
+        altitude: 1000
+    });
+    const [showManualInput, setShowManualInput] = useState(false);
+
+    const [clickAddMode, setClickAddMode] = useState(false);
+
+    useEffect(() => {
+        if (!waypointManager) return;
+
+        const updateWaypoints = () => {
+            setWaypoints(waypointManager.getWaypoints());
+        };
+
+        updateWaypoints();
+
+        waypointManager.on('waypointAdded', updateWaypoints);
+        waypointManager.on('waypointRemoved', updateWaypoints);
+        waypointManager.on('waypointsCleared', updateWaypoints);
+
+        return () => {
+            waypointManager.off('waypointAdded', updateWaypoints);
+            waypointManager.off('waypointRemoved', updateWaypoints);
+            waypointManager.off('waypointsCleared', updateWaypoints);
+        };
+    }, [waypointManager]);
+
+    const handleMapClick = useCallback(async (movement) => {
+        if (!waypointManager || !viewer) return;
+
+        const cartesian = viewer.scene.pickPosition(movement.position);
+        if (Cesium.defined(cartesian)) {
+            const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+            const lat = Cesium.Math.toDegrees(cartographic.latitude);
+            const lon = Cesium.Math.toDegrees(cartographic.longitude);
+            const aglAltitude = 1000; // 对地高度1000米
+
+            await waypointManager.addWaypoint(
+                lon,
+                lat,
+                aglAltitude,
+                `航点 ${waypoints.length + 1}`
+            );
+        }
+    }, [waypointManager, viewer, waypoints.length]);
+
+    useEffect(() => {
+        if (!viewer || !clickAddMode) {
+            return;
+        }
+
+        const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+        handler.setInputAction(handleMapClick, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+        return () => {
+            if (handler && !handler.isDestroyed()) {
+                handler.destroy();
+            }
+        };
+    }, [viewer, clickAddMode, handleMapClick]);
+
+    const handleAddLandmark = async () => {
+        if (!selectedLandmark || !waypointManager) return;
+
+        const landmark = LANDMARKS.find(l => l.name === selectedLandmark);
+        if (landmark) {
+            await waypointManager.addWaypointFromLandmark(landmark, altitude);
+            setSelectedLandmark('');
+        }
+    };
+
+    const handleAddManualWaypoint = async () => {
+        if (!waypointManager) return;
+
+        const lat = parseFloat(manualInput.latitude);
+        const lon = parseFloat(manualInput.longitude);
+        const alt = parseFloat(manualInput.altitude);
+
+        if (isNaN(lat) || isNaN(lon) || isNaN(alt)) {
+            alert('请输入有效的坐标和高度');
+            return;
+        }
+
+        if (lat < -90 || lat > 90) {
+            alert('纬度必须在 -90 到 90 之间');
+            return;
+        }
+
+        if (lon < -180 || lon > 180) {
+            alert('经度必须在 -180 到 180 之间');
+            return;
+        }
+
+        const waypointName = manualInput.name || `航点 ${waypoints.length + 1}`;
+        await waypointManager.addWaypoint(lon, lat, alt, waypointName);
+
+        setManualInput({
+            name: '',
+            latitude: '',
+            longitude: '',
+            altitude: 1000
+        });
+        setShowManualInput(false);
+    };
+
+    const handleRemoveWaypoint = (waypointId) => {
+        if (waypointManager) {
+            waypointManager.removeWaypoint(waypointId);
+        }
+    };
+
+    const handleClearAll = () => {
+        if (waypointManager && window.confirm('确定要清除所有航点吗？')) {
+            waypointManager.clearWaypoints();
+        }
+    };
+
+    const handleStartNavigation = () => {
+        if (waypointManager && waypointManager.startNavigation()) {
+            onNavigationStart?.();
+        }
+    };
+
+    const handleStopNavigation = () => {
+        if (waypointManager) {
+            waypointManager.stopNavigation();
+            onNavigationStop?.();
+        }
+    };
+
+    return (
+        <div style={containerStyle}>
+            <button 
+                style={toggleButtonStyle}
+                onClick={() => setShowPanel(!showPanel)}
+            >
+                {showPanel ? '✕' : '📍'} 航点管理
+            </button>
+
+            {showPanel && (
+                <div style={panelStyle}>
+                    <h3 style={headerStyle}>航点管理</h3>
+
+                    <div style={sectionStyle}>
+                        <label style={labelStyle}>添加航点方式:</label>
+                        <div style={addMethodButtonsStyle}>
+                            <button
+                                style={{
+                                    ...methodButtonStyle,
+                                    backgroundColor: !showManualInput && !clickAddMode ? '#003300' : 'transparent'
+                                }}
+                                onClick={() => {
+                                    setShowManualInput(false);
+                                    setClickAddMode(false);
+                                }}
+                            >
+                                📍 地标
+                            </button>
+                            <button
+                                style={{
+                                    ...methodButtonStyle,
+                                    backgroundColor: showManualInput ? '#003300' : 'transparent'
+                                }}
+                                onClick={() => {
+                                    if (showManualInput) {
+                                        setShowManualInput(false);
+                                    } else {
+                                        setShowManualInput(true);
+                                        setClickAddMode(false);
+                                    }
+                                }}
+                            >
+                                ⌨️ 手动输入
+                            </button>
+                            <button
+                                style={{
+                                    ...methodButtonStyle,
+                                    backgroundColor: clickAddMode ? '#003300' : 'transparent',
+                                    border: clickAddMode ? '2px solid #ffff00' : '1px solid #00ff00'
+                                }}
+                                onClick={() => {
+                                    if (clickAddMode) {
+                                        setClickAddMode(false);
+                                    } else {
+                                        setShowManualInput(false);
+                                        setClickAddMode(true);
+                                    }
+                                }}
+                            >
+                                🖱️ 点击地图
+                            </button>
+                        </div>
+                        {clickAddMode && (
+                            <div style={clickModeHintStyle}>
+                                ✨ 地图点击模式已启用，单击地图添加航点
+                            </div>
+                        )}
+                    </div>
+
+                    {showManualInput && (
+                        <div style={manualInputSectionStyle}>
+                            <input
+                                type="text"
+                                placeholder="航点名称（可选）"
+                                style={inputStyle}
+                                value={manualInput.name}
+                                onChange={(e) => setManualInput({...manualInput, name: e.target.value})}
+                            />
+                            <div style={coordRowStyle}>
+                                <input
+                                    type="number"
+                                    className="no-spin"
+                                    placeholder="纬度 (-90 ~ 90)"
+                                    style={{...inputStyle, width: '48%'}}
+                                    value={manualInput.latitude}
+                                    onChange={(e) => setManualInput({...manualInput, latitude: e.target.value})}
+                                    step="0.0001"
+                                />
+                                <input
+                                    type="number"
+                                    className="no-spin"
+                                    placeholder="经度 (-180 ~ 180)"
+                                    style={{...inputStyle, width: '48%'}}
+                                    value={manualInput.longitude}
+                                    onChange={(e) => setManualInput({...manualInput, longitude: e.target.value})}
+                                    step="0.0001"
+                                />
+                            </div>
+                            <input
+                                type="number"
+                                className="no-spin"
+                                placeholder="对地高度 (米)"
+                                style={inputStyle}
+                                value={manualInput.altitude}
+                                onChange={(e) => setManualInput({...manualInput, altitude: e.target.value})}
+                                min="100"
+                                max="15000"
+                                step="100"
+                            />
+                            <button 
+                                style={addButtonStyle}
+                                onClick={handleAddManualWaypoint}
+                            >
+                                ➕ 添加航点
+                            </button>
+                        </div>
+                    )}
+
+                    {!showManualInput && !clickAddMode && (
+                        <div style={sectionStyle}>
+                            <label style={labelStyle}>选择地标:</label>
+                            <select 
+                                style={selectStyle}
+                                value={selectedLandmark}
+                                onChange={(e) => setSelectedLandmark(e.target.value)}
+                            >
+                                <option value="">选择地标...</option>
+                                {LANDMARKS.map(landmark => (
+                                    <option key={landmark.name} value={landmark.name}>
+                                        {landmark.name}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <div style={altitudeRowStyle}>
+                                <label style={labelStyle}>对地高度 (米):</label>
+                                <input
+                                    type="number"
+                                    className="no-spin"
+                                    style={inputStyle}
+                                    value={altitude}
+                                    onChange={(e) => setAltitude(Number(e.target.value))}
+                                    min="100"
+                                    max="15000"
+                                    step="100"
+                                />
+                            </div>
+
+                            <button 
+                                style={addButtonStyle}
+                                onClick={handleAddLandmark}
+                                disabled={!selectedLandmark}
+                            >
+                                ➕ 添加航点
+                            </button>
+                        </div>
+                    )}
+
+                    <div style={sectionStyle}>
+                        <div style={listHeaderStyle}>
+                            <span>航点列表 ({waypoints.length})</span>
+                            {waypoints.length > 0 && (
+                                <button 
+                                    style={clearButtonStyle}
+                                    onClick={handleClearAll}
+                                >
+                                    清空
+                                </button>
+                            )}
+                        </div>
+
+                        <div style={waypointListStyle}>
+                            {waypoints.length === 0 ? (
+                                <div style={emptyStyle}>暂无航点</div>
+                            ) : (
+                                waypoints.map((wp, index) => (
+                                    <div 
+                                        key={wp.id} 
+                                        style={{
+                                            ...waypointItemStyle,
+                                            backgroundColor: wp.reached ? 'rgba(0, 255, 0, 0.1)' : 'rgba(0, 0, 0, 0.3)'
+                                        }}
+                                    >
+                                        <div style={waypointNumberStyle}>
+                                            {index + 1}
+                                        </div>
+                                        <div style={waypointDetailsStyle}>
+                                            <div style={waypointNameItemStyle}>
+                                                {wp.name}
+                                                {wp.reached && <span style={reachedBadgeStyle}>✓</span>}
+                                            </div>
+                                            <div style={waypointCoordsStyle}>
+                                                {wp.latitude.toFixed(4)}°, {wp.longitude.toFixed(4)}° @ {Math.round(wp.altitude)}m
+                                            </div>
+                                        </div>
+                                        {!wp.reached && (
+                                            <button 
+                                                style={removeButtonStyle}
+                                                onClick={() => handleRemoveWaypoint(wp.id)}
+                                            >
+                                                ✕
+                                            </button>
+                                        )}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+
+                    <div style={sectionStyle}>
+                        {!isNavigating ? (
+                            <button 
+                                style={{ ...navButtonStyle, backgroundColor: '#00aa00' }}
+                                onClick={handleStartNavigation}
+                                disabled={waypoints.length === 0 || isAutoFlying}
+                            >
+                                🚀 开始导航
+                            </button>
+                        ) : (
+                            <button 
+                                style={{
+                                    ...navButtonStyle,
+                                    backgroundColor: isAutoFlying ? '#555' : '#aa0000',
+                                    cursor: isAutoFlying ? 'not-allowed' : 'pointer'
+                                }}
+                                onClick={handleStopNavigation}
+                                disabled={isAutoFlying}
+                            >
+                                {isAutoFlying ? '✈️ 自动飞行中...' : '⏹️ 停止导航'}
+                            </button>
+                        )}
+                    </div>
+
+                    <div style={hintStyle}>
+                        💡 提示: 高度输入现在是相对于地面的高度。
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const addMethodButtonsStyle = { display: 'flex', gap: '8px', marginBottom: '10px', };
+const methodButtonStyle = { flex: 1, padding: '8px', backgroundColor: 'transparent', border: '1px solid #00ff00', color: '#00ff00', borderRadius: '4px', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', transition: 'all 0.2s', };
+const manualInputSectionStyle = { backgroundColor: 'rgba(0, 50, 0, 0.2)', border: '1px solid #00ff00', borderRadius: '6px', padding: '12px', marginBottom: '15px', };
+const coordRowStyle = { display: 'flex', justifyContent: 'space-between', gap: '4%', };
+const clickModeHintStyle = { color: '#ffff00', fontSize: '11px', marginTop: '5px', padding: '6px', backgroundColor: 'rgba(255, 255, 0, 0.1)', borderRadius: '4px', textAlign: 'center', };
+const containerStyle = { position: 'absolute', bottom: '40px', right: '20px', zIndex: 1000, };
+const toggleButtonStyle = { backgroundColor: 'rgba(0, 0, 0, 0.7)', border: '2px solid #00ff00', color: '#00ff00', padding: '10px 15px', borderRadius: '5px', cursor: 'pointer', fontFamily: 'monospace', fontSize: '14px', fontWeight: 'bold', };
+const panelStyle = { backgroundColor: 'rgba(0, 0, 0, 0.9)', border: '2px solid #00ff00', borderRadius: '10px', padding: '15px', marginTop: '10px', width: '350px', maxHeight: '70vh', overflowY: 'auto', fontFamily: 'monospace', };
+const headerStyle = { color: '#00ff00', margin: '0 0 15px 0', fontSize: '18px', borderBottom: '2px solid #00ff00', paddingBottom: '10px', };
+const sectionStyle = { marginBottom: '15px', };
+const labelStyle = { display: 'block', color: '#00ff00', marginBottom: '6px', fontSize: '12px', };
+const selectStyle = { width: '100%', padding: '8px', backgroundColor: 'rgba(0,0,0,0.6)', color: '#00ff00', border: '1px solid #00ff00', borderRadius: '4px', marginBottom: '10px', fontFamily: 'monospace', };
+const inputStyle = { width: '100%', padding: '8px', backgroundColor: 'rgba(0,0,0,0.6)', color: '#00ff00', border: '1px solid #00ff00', borderRadius: '4px', marginBottom: '10px', fontFamily: 'monospace', display: 'flex', boxSizing: 'border-box', paddingRight: '12px', };
+const altitudeRowStyle = { display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', };
+const addButtonStyle = { width: '100%', backgroundColor: '#003300', border: '1px solid #00ff00', color: '#00ff00', padding: '8px', borderRadius: '4px', cursor: 'pointer', fontFamily: 'monospace', };
+const listHeaderStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#00ff00', marginBottom: '8px', };
+const clearButtonStyle = { backgroundColor: 'transparent', border: '1px solid #ff4444', color: '#ff4444', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontFamily: 'monospace', fontSize: '12px', };
+const waypointListStyle = { display: 'flex', flexDirection: 'column', gap: '8px', };
+const emptyStyle = { color: '#888', textAlign: 'center', padding: '12px 0', };
+const waypointItemStyle = { display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid #00ff00', borderRadius: '6px', padding: '8px', };
+const waypointNumberStyle = { minWidth: '28px', height: '28px', lineHeight: '28px', textAlign: 'center', borderRadius: '50%', border: '1px solid #00ff00', color: '#00ff00', fontFamily: 'monospace', };
+const waypointDetailsStyle = { flex: 1, display: 'flex', flexDirection: 'column', gap: '3px', };
+const waypointNameItemStyle = { color: '#00ff00', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', };
+const reachedBadgeStyle = { color: '#00ff00', border: '1px solid #00ff00', borderRadius: '4px', padding: '0 4px', fontSize: '10px', };
+const waypointCoordsStyle = { color: '#9ee89e', fontSize: '12px', fontFamily: 'monospace', };
+const removeButtonStyle = { backgroundColor: 'transparent', border: '1px solid #ff4444', color: '#ff4444', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', fontFamily: 'monospace', };
+const navButtonStyle = { width: '100%', border: '1px solid #00ff00', color: '#fff', padding: '10px', borderRadius: '6px', cursor: 'pointer', fontFamily: 'monospace', };
+const hintStyle = { color: '#9ee89e', fontSize: '12px', marginTop: '8px', };
+
+export default WaypointControl;
+
+--- End of File: src/components/WaypointControl/index.jsx ---
+
+--- File: src/components/EnterPrompt/index.jsx ---
+
+// components/EnterPrompt/index.jsx
+
+import { useState } from 'react';
+
+const overlayStyle = {
+    position: 'fixed',
+    inset: 0,
+    width: '100vw',
+    height: '100vh',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+    backdropFilter: 'blur(6px)'
+};
+
+const containerStyle = {
+    display: 'flex',
+    gridTemplateColumns: '1.1fr 0.9fr',
+    gap: '24px',
+    backgroundColor: 'rgba(20, 20, 20, 0.95)',
+    padding: '32px',
+    borderRadius: '16px',
+    border: '2px solid #00ff00',
+    boxShadow: '0 0 30px rgba(0, 255, 0, 0.25)',
+    width: 'fit-content',
+};
+
+const leftColStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    minWidth: 0,
+};
+
+const badgeStyle = {
+    alignSelf: 'flex-start',
+    color: '#001800',
+    backgroundColor: '#00ff00',
+    borderRadius: '999px',
+    padding: '4px 10px',
+    fontFamily: 'monospace',
+    fontSize: '12px',
+    fontWeight: 'bold',
+    boxShadow: '0 0 10px rgba(0,255,0,.3)'
+};
+
+const titleStyle = {
+    color: '#00ff00',
+    fontSize: '28px',
+    margin: 0,
+    fontFamily: 'monospace',
+    textShadow: '0 0 10px rgba(0, 255, 0, 0.5)'
+};
+
+const subtitleStyle = {
+    color: '#9ee89e',
+    margin: 0,
+    fontSize: '14px',
+    lineHeight: 1.6
+};
+
+const panelStyle = {
+    border: '1px solid #00ff00',
+    borderRadius: '12px',
+    padding: '14px',
+    background: 'rgba(0,0,0,0.35)',
+    color: '#cceccc',
+    fontFamily: 'monospace'
+};
+
+const panelHeaderStyle = {
+    color: '#00ff00',
+    fontSize: '14px',
+    marginBottom: '8px',
+    fontWeight: 'bold',
+    borderBottom: '1px dashed #00ff00',
+    paddingBottom: '6px'
+};
+
+const emphasisStyle = {
+    fontFamily: 'monospace',
+    display: 'inline-block',
+    padding: '2px 6px',
+    background: 'rgba(255,90,0,0.15)',
+    border: '1px solid #ff5a00',
+    borderRadius: '6px',
+    color: '#ff7b1f',
+    fontWeight: 'bold',
+    textShadow: '0 0 6px rgba(255,120,0,0.6)',
+    boxShadow: '0 0 8px rgba(255,120,0,0.4)',
+};
+
+const shortcutBoxStyle = {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '6px',
+    color: '#cceccc',
+    fontSize: '12px'
+};
+
+const keyStyle = {
+    display: 'inline-block',
+    border: '1px solid #00ff00',
+    borderRadius: '6px',
+    padding: '2px 6px',
+    color: '#00ff00',
+    marginRight: '6px',
+    minWidth: '28px',
+    textAlign: 'center'
+};
+
+const buttonBarStyle = {
+    display: 'flex',
+    gap: '12px',
+    marginTop: '8px',
+};
+
+const startButtonStyle = (hovered) => ({
+    padding: '14px 26px',
+    fontSize: '16px',
+    backgroundColor: hovered ? '#00cc00' : '#00cc0039',
+    color: hovered ? '#000000ff' : '#00cc00',
+    border: hovered ? '2px solid #14ff3bff' : '2px solid #00cc00',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontFamily: 'monospace',
+    fontWeight: 'bold',
+    transition: 'all 0.25s ease',
+    boxShadow: hovered ? '0 0 24px rgba(0, 255, 0, 0.5)' : '0 0 16px rgba(0, 0, 0, 0)',
+    transform: hovered ? 'translateY(-1px)' : 'translateY(0)',
+    width: '200px',
+});
+
+const EnterPrompt = ({ onUnlock }) => {
+    const [hover, setHover] = useState(false);
+    const [audioEnabled] = useState(true);
+
+    const handleStart = () => {
+        try {
+            onUnlock?.({ audioEnabled });
+        } catch {
+            onUnlock?.();
+        }
+    };
+
+    return (
+        <div style={overlayStyle}>
+            <div style={containerStyle}>
+                <div style={leftColStyle}>
+                    <span style={badgeStyle}>Flight Simulator</span>
+                    <h2 style={titleStyle}>欢迎进入飞行模拟</h2>
+                    <p style={subtitleStyle}>
+                        体验高速俯冲、精准机动与全球航点导航。启用音效以获得引擎、失速与音爆的沉浸式体验。
+                    </p>
+
+                    <div style={{ ...panelStyle, marginTop: '6px' }}>
+                        <div style={panelHeaderStyle}>快捷键</div>
+                        <div style={shortcutBoxStyle}>
+                            <div><span style={keyStyle}>W/S</span>俯冲 / 抬升</div>
+                            <div><span style={keyStyle}>A/D</span>左滚 / 右滚</div>
+                            <div><span style={keyStyle}>Q/E</span>左转 / 右转</div>
+                            <div><span style={keyStyle}>Shift/Ctrl</span>加速 / 减速</div>
+                        </div>
+                    </div>                   
+
+                    <div style={panelStyle}>
+                        <div style={panelHeaderStyle}>注意事项</div>
+                        <div style={{ color: '#cceccc', fontSize: '12px', lineHeight: 1.6 }}>
+                            - 建议在桌面浏览器运行以获得最佳体验。<br />
+                            - 如果看不到地形或影像，请检查网络与 Cesium Ion Token。<br />
+                            - 点击“开始飞行”将创建用户手势以解锁音频。
+                        </div>
+                    </div>
+
+                    <span style={emphasisStyle}>由于需要实时加载并计算地形碰撞，流畅度取决于网络与设备性能。</span>
+
+                    
+                    <div style={buttonBarStyle}>
+                        <button
+                            style={startButtonStyle(hover)}
+                            onMouseEnter={() => setHover(true)}
+                            onMouseLeave={() => setHover(false)}
+                            onClick={handleStart}
+                        >
+                            我明白，开始飞行
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default EnterPrompt;
+
+--- End of File: src/components/EnterPrompt/index.jsx ---
+
+--- File: src/components/WaypointNavigation/index.jsx ---
+
+// components/WaypointNavigation/index.jsx
+
+import { useState } from 'react';
+import * as Cesium from 'cesium';
+
+import { CoordinateConverter } from '../../helpers/CoordinateConverter';
+
+const WaypointNavigation = ({ waypointManager, navigationData, flightData }) => {
+    const [showPanel, setShowPanel] = useState(true);
+
+    if (!navigationData && !waypointManager) return null;
+
+    const { currentWaypoint, distance, bearing, elevationDiff, eta, currentIndex, totalWaypoints } = navigationData || {};
+
+    // 计算相对航向（目标方位 - 当前航向）
+    const getRelativeHeading = () => {
+        if (!bearing || !flightData) return 0;
+        
+        // 将Cesium heading转换为航空bearing
+        const aircraftBearing = CoordinateConverter.cesiumHeadingToBearing(
+            Cesium.Math.toDegrees(flightData.heading)
+        );
+        
+        // 计算差值
+        const diff = bearing - aircraftBearing;
+        
+        // 归一化到 -180 到 180
+        return ((diff + 180) % 360) - 180;
+    };
+
+    const relativeHeading = getRelativeHeading();
+
+    return (
+        <div style={containerStyle}>
+            {showPanel && navigationData && (
+                <div style={navPanelStyle}>
+                    <div style={headerStyle}>
+                        <span>🎯 航点导航</span>
+                        <button 
+                            style={toggleButtonStyle}
+                            onClick={() => setShowPanel(false)}
+                        >
+                            ─
+                        </button>
+                    </div>
+
+                    <div style={waypointInfoStyle}>
+                        <div style={waypointNameStyle}>
+                            {currentWaypoint?.name}
+                        </div>
+                        <div style={progressStyle}>
+                            航点 {currentIndex + 1} / {totalWaypoints}
+                        </div>
+                    </div>
+
+                    <div style={directionIndicatorContainerStyle}>
+                        <DirectionIndicator 
+                            relativeHeading={relativeHeading}
+                            distance={distance}
+                        />
+                    </div>
+
+                    <div style={dataGridStyle}>
+                        <DataItem 
+                            label="距离" 
+                            value={`${(distance / 1000).toFixed(2)} km`}
+                            color="#00ff00"
+                        />
+                        <DataItem 
+                            label="方位" 
+                            value={`${Math.round(bearing)}°`}
+                            color="#00ffff"
+                        />
+                        <DataItem 
+                            label="高度差" 
+                            value={`${elevationDiff > 0 ? '+' : ''}${Math.round(elevationDiff)} m`}
+                            color={elevationDiff > 0 ? '#ffff00' : '#ff8800'}
+                        />
+                        <DataItem 
+                            label="预计" 
+                            value={`${Math.round(eta)} 秒`}
+                            color="#ff00ff"
+                        />
+                    </div>
+
+                    {Math.abs(relativeHeading) > 5 && (
+                        <div style={turnAdviceStyle}>
+                            {relativeHeading > 0 ? '→ 右转' : '← 左转'} {Math.abs(Math.round(relativeHeading))}°
+                        </div>
+                    )}
+
+                    {Math.abs(elevationDiff) > 100 && (
+                        <div style={altitudeAdviceStyle}>
+                            {elevationDiff > 0 ? '↑ 爬升' : '↓ 下降'} {Math.abs(Math.round(elevationDiff))} m
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {!showPanel && navigationData && (
+                <button 
+                    style={minimizedButtonStyle}
+                    onClick={() => setShowPanel(true)}
+                >
+                    🎯 导航
+                </button>
+            )}
+        </div>
+    );
+};
+
+// 方向指示器子组件
+const DirectionIndicator = ({ relativeHeading, distance }) => {
+    return (
+        <div style={indicatorStyle}>
+            <svg width="120" height="120">
+                {/* 外圈 */}
+                <circle 
+                    cx="60" 
+                    cy="60" 
+                    r="55" 
+                    fill="none" 
+                    stroke="#00ff00" 
+                    strokeWidth="2"
+                />
+                
+                {/* 刻度 */}
+                {[0, 90, 180, 270].map(angle => {
+                    const rad = (angle * Math.PI) / 180;
+                    const x1 = 60 + Math.cos(rad) * 50;
+                    const y1 = 60 + Math.sin(rad) * 50;
+                    const x2 = 60 + Math.cos(rad) * 55;
+                    const y2 = 60 + Math.sin(rad) * 55;
+                    
+                    return (
+                        <line 
+                            key={angle}
+                            x1={x1} 
+                            y1={y1} 
+                            x2={x2} 
+                            y2={y2} 
+                            stroke="#00ff00" 
+                            strokeWidth="2"
+                        />
+                    );
+                })}
+
+                {/* 飞机符号（始终朝上） */}
+                <g transform="translate(60, 60)">
+                    <path 
+                        d="M 0,-15 L -8,10 L 8,10 Z" 
+                        fill="#ff0000" 
+                        stroke="#ffffff" 
+                        strokeWidth="2"
+                    />
+                </g>
+
+                {/* 目标箭头 */}
+                <g transform={`translate(60, 60) rotate(${relativeHeading})`}>
+                    <line 
+                        x1="0" 
+                        y1="0" 
+                        x2="0" 
+                        y2="-45" 
+                        stroke="#ffff00" 
+                        strokeWidth="3"
+                        markerEnd="url(#arrowhead)"
+                    />
+                </g>
+
+                <defs>
+                    <marker 
+                        id="arrowhead" 
+                        markerWidth="10" 
+                        markerHeight="10" 
+                        refX="5" 
+                        refY="3" 
+                        orient="auto"
+                    >
+                        <polygon 
+                            points="0 0, 10 3, 0 6" 
+                            fill="#ffff00" 
+                        />
+                    </marker>
+                </defs>
+            </svg>
+            
+            <div style={distanceDisplayStyle}>
+                {(distance / 1000).toFixed(1)} km
+            </div>
+        </div>
+    );
+};
+
+// 数据项子组件
+const DataItem = ({ label, value, color }) => (
+    <div style={dataItemStyle}>
+        <div style={{ color: '#888', fontSize: '11px' }}>{label}</div>
+        <div style={{ color, fontSize: '16px', fontWeight: 'bold' }}>{value}</div>
+    </div>
+);
+
+const containerStyle = {
+    position: 'absolute',
+    top: '20px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 1000,
+};
+
+const navPanelStyle = {
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    border: '2px solid #00ff00',
+    borderRadius: '10px',
+    padding: '15px',
+    minWidth: '320px',
+    fontFamily: 'monospace',
+};
+
+const headerStyle = {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    color: '#00ff00',
+    fontSize: '16px',
+    fontWeight: 'bold',
+    marginBottom: '15px',
+    paddingBottom: '10px',
+    borderBottom: '1px solid #00ff00',
+};
+
+const toggleButtonStyle = {
+    background: 'none',
+    border: '1px solid #00ff00',
+    color: '#00ff00',
+    cursor: 'pointer',
+    padding: '2px 8px',
+    borderRadius: '3px',
+    fontSize: '14px',
+};
+
+const waypointInfoStyle = {
+    marginBottom: '15px',
+    textAlign: 'center',
+};
+
+const waypointNameStyle = {
+    color: '#ffff00',
+    fontSize: '18px',
+    fontWeight: 'bold',
+    marginBottom: '5px',
+};
+
+const progressStyle = {
+    color: '#00ffff',
+    fontSize: '12px',
+};
+
+const directionIndicatorContainerStyle = {
+    display: 'flex',
+    justifyContent: 'center',
+    marginBottom: '15px',
+};
+
+const indicatorStyle = {
+    position: 'relative',
+};
+
+const distanceDisplayStyle = {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    color: '#ffff00',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    textShadow: '0 0 5px #000',
+};
+
+const dataGridStyle = {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '10px',
+    marginBottom: '10px',
+};
+
+const dataItemStyle = {
+    backgroundColor: 'rgba(0, 50, 0, 0.5)',
+    padding: '8px',
+    borderRadius: '5px',
+    textAlign: 'center',
+};
+
+const turnAdviceStyle = {
+    backgroundColor: 'rgba(255, 255, 0, 0.2)',
+    border: '1px solid #ffff00',
+    color: '#ffff00',
+    padding: '8px',
+    borderRadius: '5px',
+    textAlign: 'center',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    marginTop: '10px',
+};
+
+const altitudeAdviceStyle = {
+    backgroundColor: 'rgba(255, 136, 0, 0.2)',
+    border: '1px solid #ff8800',
+    color: '#ff8800',
+    padding: '8px',
+    borderRadius: '5px',
+    textAlign: 'center',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    marginTop: '5px',
+};
+
+const minimizedButtonStyle = {
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    border: '2px solid #00ff00',
+    color: '#00ff00',
+    padding: '10px 20px',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontFamily: 'monospace',
+    fontSize: '14px',
+    fontWeight: 'bold',
+};
+
+export default WaypointNavigation;
+
+--- End of File: src/components/WaypointNavigation/index.jsx ---
+
+--- File: src/components/InstrumentPanel/index.jsx ---
+
+// components/InstrumentPanel/index.jsx
+
+import AttitudeIndicator from '../AttitudeIndicator';
+import RadarMap from '../RadarMap';
+import { LANDMARKS } from '../../config/landmarksConfig';
+
+const InstrumentPanel = ({ flightData, waypoints }) => {
+    if (!flightData) return null;
+
+    const { pitch, roll, position, heading } = flightData;
+
+    return (
+        <div style={panelContainerStyle}>
+            <AttitudeIndicator pitch={pitch} roll={roll} />
+            <div style={{ height: '15px' }} />
+            <RadarMap 
+                position={position} 
+                heading={heading}
+                landmarks={LANDMARKS}
+                waypoints={waypoints}
+            />
+        </div>
+    );
+};
+
+const panelContainerStyle = {
+    position: 'absolute',
+    bottom: '40px',
+    left: '20px',
+    zIndex: 1000,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+};
+
+export default InstrumentPanel;
+
+--- End of File: src/components/InstrumentPanel/index.jsx ---
+
+--- File: src/components/AttitudeIndicator/index.jsx ---
+
+// components/AttitudeIndicator/index.jsx
+
+import { useEffect, useRef } from 'react';
+import * as Cesium from 'cesium';
+
+const AttitudeIndicator = ({ pitch, roll }) => {
+    const canvasRef = useRef(null);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const size = 200;
+        const centerX = size / 2;
+        const centerY = size / 2;
+
+        // 清空画布
+        ctx.clearRect(0, 0, size, size);
+
+        // 保存当前状态
+        ctx.save();
+
+        // 移动到中心并应用滚转角
+        ctx.translate(centerX, centerY);
+        ctx.rotate(-roll); // 负号因为canvas坐标系
+
+        // 绘制天空和地面
+        const pitchPixels = (Cesium.Math.toDegrees(pitch) / 90) * (size / 2);
+        
+        // 天空
+        ctx.fillStyle = '#4a90e2';
+        ctx.fillRect(-size, -size, size * 2, size + pitchPixels);
+        
+        // 地面
+        ctx.fillStyle = '#8b4513';
+        ctx.fillRect(-size, pitchPixels, size * 2, size * 2);
+
+        // 绘制地平线
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-size, pitchPixels);
+        ctx.lineTo(size, pitchPixels);
+        ctx.stroke();
+
+        // 绘制俯仰刻度线
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.font = '12px monospace';
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+
+        for (let angle = -90; angle <= 90; angle += 10) {
+            if (angle === 0) continue;
+            const y = pitchPixels - (angle / 90) * (size / 2);
+            
+            if (Math.abs(y) < size) {
+                const lineLength = angle % 30 === 0 ? 40 : 20;
+                ctx.beginPath();
+                ctx.moveTo(-lineLength / 2, y);
+                ctx.lineTo(lineLength / 2, y);
+                ctx.stroke();
+
+                if (angle % 30 === 0) {
+                    const label = angle > 0 ? `${angle}` : `${-angle}`;
+                    const labelX = lineLength / 2;
+                    ctx.fillText(label, labelX, y);
+                }
+            }
+        }
+
+        // 恢复状态
+        ctx.restore();
+
+        // 绘制飞机标志（固定在中心）
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        // 中心点
+        ctx.arc(centerX, centerY, 3, 0, Math.PI * 2);
+        ctx.fill();
+        // 左翼
+        ctx.moveTo(centerX - 60, centerY);
+        ctx.lineTo(centerX - 10, centerY);
+        // 右翼
+        ctx.moveTo(centerX + 10, centerY);
+        ctx.lineTo(centerX + 60, centerY);
+        // 中心横线
+        ctx.moveTo(centerX - 10, centerY);
+        ctx.lineTo(centerX + 10, centerY);
+        ctx.stroke();
+
+        // 绘制外框
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(2, 2, size - 4, size - 4);
+
+        // 绘制滚转刻度
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        
+        // 外圈刻度
+        const radius = size / 2 - 15;
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 2;
+        
+        for (let angle = 0; angle < 360; angle += 30) {
+            const rad = Cesium.Math.toRadians(angle);
+            const x1 = Math.cos(rad - Math.PI / 2) * radius;
+            const y1 = Math.sin(rad - Math.PI / 2) * radius;
+            const length = angle % 90 === 0 ? 10 : 5;
+            const x2 = Math.cos(rad - Math.PI / 2) * (radius - length);
+            const y2 = Math.sin(rad - Math.PI / 2) * (radius - length);
+            
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+
+        // 滚转指示三角形
+        ctx.fillStyle = '#ffff00';
+        ctx.strokeStyle = '#ffff00';
+        ctx.lineWidth = 2;
+        ctx.save();
+        ctx.rotate(-roll);
+        ctx.beginPath();
+        ctx.moveTo(0, -radius + 5);
+        ctx.lineTo(-8, -radius + 15);
+        ctx.lineTo(8, -radius + 15);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.restore();
+
+    }, [pitch, roll]);
+
+    return (
+        <div style={containerStyle}>
+            <div style={labelStyle}>人工地平仪</div>
+            <canvas 
+                ref={canvasRef} 
+                width={200} 
+                height={200}
+                style={canvasStyle}
+            />
+            <div style={infoStyle}>
+                <div>俯仰: {Math.round(Cesium.Math.toDegrees(pitch))}°</div>
+                <div>滚转: {Math.round(Cesium.Math.toDegrees(roll))}°</div>
+            </div>
+        </div>
+    );
+};
+
+const containerStyle = {
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: '10px',
+    borderRadius: '10px',
+    border: '2px solid #00ff00',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center'
+};
+
+const labelStyle = {
+    color: '#00ff00',
+    fontFamily: 'monospace',
+    fontSize: '14px',
+    fontWeight: 'bold',
+    marginBottom: '5px',
+    textAlign: 'center',
+};
+
+const canvasStyle = {
+    display: 'block',
+    border: '1px solid #00ff00',
+    borderRadius: '5px',
+};
+
+const infoStyle = {
+    marginTop: '5px',
+    color: '#00ff00',
+    fontFamily: 'monospace',
+    fontSize: '12px',
+    textAlign: 'center',
+};
+
+export default AttitudeIndicator;
+
+--- End of File: src/components/AttitudeIndicator/index.jsx ---
+
+--- File: src/config/landmarksConfig.js ---
+
+// config/landmarksConfig.js
+
+export const LANDMARKS = [
+    // 中国
+    { name: '上海东方明珠', longitude: 121.4995, latitude: 31.2397, color: '#ff00ff' },
+    { name: '北京故宫', longitude: 116.3972, latitude: 39.9163, color: '#ff00ff' },
+    { name: '香港维多利亚港', longitude: 114.1694, latitude: 22.2783, color: '#ff00ff' },
+    { name: '西安秦始皇兵马俑', longitude: 109.2924, latitude: 34.3849, color: '#ff00ff' },
+    { name: '拉萨布达拉宫', longitude: 91.1175, latitude: 29.6578, color: '#ff00ff' },
+    { name: '八达岭长城', longitude: 116.0206, latitude: 40.3653, color: '#ff00ff' },
+
+    // 亚洲
+    { name: '东京塔', longitude: 139.7454, latitude: 35.6586, color: '#ff8800' },
+    { name: '印度泰姬陵', longitude: 78.0421, latitude: 27.1751, color: '#ff8800' },
+    { name: '柬埔寨吴哥窟', longitude: 103.8669, latitude: 13.4125, color: '#ff8800' },
+    { name: '泰国大皇宫', longitude: 100.4920, latitude: 13.7500, color: '#ff8800' },
+    { name: '新加坡鱼尾狮公园', longitude: 103.8520, latitude: 1.2868, color: '#ff8800' },
+    { name: '韩国景福宫', longitude: 126.9769, latitude: 37.5796, color: '#ff8800' },
+    { name: '马来西亚双子塔', longitude: 101.6869, latitude: 3.1579, color: '#ff8800' },
+    { name: '印尼婆罗浮屠', longitude: 110.2038, latitude: -7.6079, color: '#ff8800' },
+    { name: '阿联酋哈利法塔', longitude: 55.2744, latitude: 25.1972, color: '#ff8800' },
+    { name: '台湾台北101', longitude: 121.5645, latitude: 25.0339, color: '#ff8800' },
+    { name: '珠穆朗玛峰(南坡)', longitude: 86.9250, latitude: 27.9881, color: '#ff8800' },
+    
+    // 北美
+    { name: '纽约自由女神像', longitude: -74.0445, latitude: 40.6892, color: '#ffff00' },
+    { name: '旧金山金门大桥', longitude: -122.4783, latitude: 37.8199, color: '#ffff00' },
+    { name: '华盛顿白宫', longitude: -77.0365, latitude: 38.8977, color: '#ffff00' },
+    { name: '拉斯维加斯大道', longitude: -115.1728, latitude: 36.1147, color: '#ffff00' },
+    { name: '黄石老忠实泉', longitude: -110.8281, latitude: 44.4605, color: '#ffff00' },
+    { name: '多伦多CN塔', longitude: -79.3871, latitude: 43.6426, color: '#ffff00' },
+    { name: '墨西哥奇琴伊察', longitude: -88.5678, latitude: 20.6843, color: '#ffff00' },
+    { name: '科罗拉多大峡谷(马瑟点)', longitude: -112.1129, latitude: 36.0570, color: '#ffff00' },
+    { name: '优胜美地半圆丘', longitude: -119.5332, latitude: 37.7459, color: '#ffff00' },
+    
+    // 欧洲
+    { name: '巴黎埃菲尔铁塔', longitude: 2.2945, latitude: 48.8584, color: '#00ffff' },
+    { name: '伦敦大本钟', longitude: -0.1246, latitude: 51.5007, color: '#00ffff' },
+    { name: '罗马斗兽场', longitude: 12.4922, latitude: 41.8902, color: '#00ffff' },
+    { name: '巴塞罗那圣家堂', longitude: 2.1744, latitude: 41.4036, color: '#00ffff' },
+    { name: '雅典卫城', longitude: 23.7257, latitude: 37.9715, color: '#00ffff' },
+    { name: '柏林勃兰登堡门', longitude: 13.3777, latitude: 52.5163, color: '#00ffff' },
+    { name: '莫斯科红场', longitude: 37.6208, latitude: 55.7540, color: '#00ffff' },
+    { name: '布拉格查理大桥', longitude: 14.4114, latitude: 50.0865, color: '#00ffff' },
+    { name: '威尼斯圣马可广场', longitude: 12.3389, latitude: 45.4340, color: '#00ffff' },
+    { name: '梵蒂冈圣彼得大教堂', longitude: 12.4534, latitude: 41.9022, color: '#00ffff' },
+    { name: '阿姆斯特丹国立博物馆', longitude: 4.8852, latitude: 52.3600, color: '#00ffff' },
+    
+    // 南美
+    { name: '里约热内卢基督像', longitude: -43.2105, latitude: -22.9519, color: '#ffaa00' },
+    { name: '秘鲁马丘比丘', longitude: -72.5449, latitude: -13.1631, color: '#ffaa00' },
+    { name: '伊瓜苏瀑布', longitude: -54.4447, latitude: -25.6953, color: '#ffaa00' },
+    { name: '玻利维亚乌尤尼盐沼', longitude: -67.4891, latitude: -20.1338, color: '#ffaa00' },
+    { name: '佩里托莫雷诺冰川', longitude: -73.0494, latitude: -50.4726, color: '#ffaa00' },
+
+    // 非洲
+    { name: '埃及吉萨金字塔', longitude: 31.1342, latitude: 29.9792, color: '#00ff88' },
+    { name: '坦桑尼亚乞力马扎罗', longitude: 37.3556, latitude: -3.0674, color: '#00ff88' },
+    { name: '开普敦桌山', longitude: 18.4106, latitude: -33.9630, color: '#00ff88' },
+    { name: '马拉喀什杰马夫纳广场', longitude: -7.9880, latitude: 31.6258, color: '#00ff88' },
+    { name: '维多利亚瀑布', longitude: 25.8580, latitude: -17.9243, color: '#00ff88' },
+
+    // 中东
+    { name: '约旦佩特拉古城', longitude: 35.4444, latitude: 30.3285, color: '#ff4444' },
+    { name: '耶路撒冷圣殿山', longitude: 35.2354, latitude: 31.7767, color: '#ff4444' },
+    { name: '麦加禁寺', longitude: 39.8262, latitude: 21.4225, color: '#ff4444' },
+    { name: '伊斯坦布尔圣索菲亚大教堂', longitude: 28.9799, latitude: 41.0086, color: '#ff4444' },
+
+    // 大洋洲
+    { name: '悉尼歌剧院', longitude: 151.2153, latitude: -33.8568, color: '#ff8800' },
+    { name: '澳大利亚大堡礁', longitude: 147.6992, latitude: -18.2871, color: '#ff8800' },
+    { name: '澳大利亚乌鲁鲁(巨岩)', longitude: 131.0369, latitude: -25.3444, color: '#ff8800' },
+    { name: '新西兰米尔福德峡湾', longitude: 167.9230, latitude: -44.6760, color: '#ff8800' },
+    { name: '奥克兰天空塔', longitude: 174.7633, latitude: -36.8485, color: '#ff8800' },
+    { name: '复活节岛摩艾石像', longitude: -109.2760, latitude: -27.1250, color: '#ff8800' },
+];
+
+--- End of File: src/config/landmarksConfig.js ---
+
+--- File: src/config/aircraftConfig.js ---
+
+// src/config/aircraftConfig.js
+
+import * as Cesium from 'cesium';
+
+const DEFAULT_ICON = 'assets/plane.png';
+
+export const AIRCRAFT = {
+    CESIUM_AIR: {
+        id: 'CESIUM_AIR',
+        name: 'Cesium Air (通用)',
+        uri: 'assets/Cesium_Air.glb',
+        iconUrl: DEFAULT_ICON,
+        scale: 1.0,
+        physics: {
+            maxSpeed: 300, // m/s (约 1080 km/h)
+            pitchRate: 1.5, // 俯仰速率
+            rollRate: 3.0,  // 滚转速率
+            yawRate: 1.0,   // 偏航速率
+            stallSpeed: 40, // 失速速度 m/s
+        },
+    },
+    F22: {
+        id: 'F-22 Raptor',
+        name: 'F-22 Raptor (战斗机)',
+        uri: 'assets/f22.glb',
+        iconUrl: DEFAULT_ICON,
+        scale: 10.0,
+        physics: {
+            maxSpeed: 650,
+            pitchRate: 9.0,
+            rollRate: 25.0,
+            yawRate: 5.0,
+            stallSpeed: 80,
+        },
+    },
+    TIE: {
+        id: 'TIE',
+        name: 'TIE Fighter (星际战斗机)',
+        uri: 'assets/tie.glb',
+        iconUrl: DEFAULT_ICON,
+        scale: 1.0,
+        modelOptions: {
+            silhouetteColor : Cesium.Color.WHITE,
+            silhouetteSize : 0,
+            colorBlendMode:Cesium.ColorBlendMode.MIX,
+            colorBlendAmount: 0.1
+        },
+        physics: {
+            maxSpeed: 999,
+            pitchRate: 20.0,
+            rollRate: 50.0,
+            yawRate: 12.0,
+            stallSpeed: 75,
+        },
+    },
+};
+
+export const AIRCRAFT_LIST = Object.values(AIRCRAFT);
+
+
+--- End of File: src/config/aircraftConfig.js ---
+
+--- File: src/helpers/Aircraft.js ---
+
+// src/helpers/Aircraft.js
+
+import * as Cesium from 'cesium';
+import { Physics } from './Physics';
+
+const _orientationFixResult = new Cesium.Quaternion();
+
+export class Aircraft {
+    constructor(viewer, config, initialPosition, initialHeading = 0, initialOrientation = null) {
+        this.viewer = viewer;
+        this.config = config;
+
+        const initOrientation = initialOrientation
+        ? Cesium.Quaternion.clone(initialOrientation)
+        : Cesium.Transforms.headingPitchRollQuaternion(
+            initialPosition,
+            new Cesium.HeadingPitchRoll(initialHeading, 0, 0)
+            );
+
+        this.state = {
+        position: initialPosition,
+        velocity: new Cesium.Cartesian3(0, 0, 0),
+        orientation: initOrientation,
+        heading: initialHeading,
+        pitch: 0,
+        roll: 0,
+        speed: 50,
+        throttle: 0.5,
+        status: { isStalled: false, isSupersonic: false, crashed: false },
+        };
+
+        this.entity = this._createEntity();
+    }
+
+    _createEntity() {
+        return this.viewer.entities.add({
+            position: new Cesium.CallbackProperty(() => this.state.position, false),
+            
+            orientation: new Cesium.CallbackProperty(() => {
+                if (this.config.orientationFix) {
+                    return Cesium.Quaternion.multiply(
+                        this.state.orientation, 
+                        this.config.orientationFix, 
+                        _orientationFixResult
+                    );
+                }
+                return this.state.orientation;
+            }, false),
+
+            model: {
+                uri: this.config.uri,
+                scale: this.config.scale,
+                minimumPixelSize: this.config.minimumPixelSize,
+                // 使用展开运算符(...)将modelOptions中的所有属性应用到这里
+                ...this.config.modelOptions 
+            }
+        });
+    }
+
+    // 添加 terrainHeight 参数
+    update(controls, deltaTime, terrainHeight) {
+        if (this.state.status.crashed) return;
+        
+        // 将 terrainHeight 传递给 Physics.update
+        const newState = Physics.update(this.state, controls, this.config.physics, deltaTime, terrainHeight);
+        this.state = newState;
+    }
+
+    destroy() {
+        if (this.entity) {
+            this.viewer.entities.remove(this.entity);
+            this.entity = null;
+        }
+    }
+}
+
+--- End of File: src/helpers/Aircraft.js ---
+
+--- File: src/helpers/InputController.js ---
+
+// src/helpers/InputController.js
+
+export class InputController {
+    constructor() {
+        this.controls = {
+            pitch: 0, // -1 to 1 (S to W)
+            roll: 0,  // -1 to 1 (A to D)
+            yaw: 0,   // -1 to 1 (Q to E)
+            throttle: 0 // -1 to 1 (Ctrl to Shift)
+        };
+        this.keys = {};
+        this._addEventListeners();
+    }
+
+    _addEventListeners() {
+        this._onKeyDown = (e) => this._handleKeyEvent(e, true);
+        this._onKeyUp   = (e) => this._handleKeyEvent(e, false);
+        window.addEventListener('keydown', this._onKeyDown);
+        window.addEventListener('keyup', this._onKeyUp);
+    }
+
+    _handleKeyEvent(e, isPressed) {
+        this.keys[e.key.toLowerCase()] = isPressed;
+        this._updateControls();
+    }
+
+    _updateControls() {
+        this.controls.pitch = (this.keys['w'] ? 1 : 0) + (this.keys['s'] ? -1 : 0);
+        this.controls.roll = (this.keys['a'] ? -1 : 0) + (this.keys['d'] ? 1 : 0);
+        this.controls.yaw = (this.keys['q'] ? -1 : 0) + (this.keys['e'] ? 1 : 0);
+        this.controls.throttle = (this.keys['shift'] ? 1 : 0) + (this.keys['control'] ? -1 : 0);
+    }
+    
+    destroy() {
+        window.removeEventListener('keydown', this._onKeyDown);
+        window.removeEventListener('keyup', this._onKeyUp);
+    }
+}
+
+--- End of File: src/helpers/InputController.js ---
+
+--- File: src/helpers/CameraController.js ---
+
+// src/helpers/CameraController.js
+
+import * as Cesium from 'cesium';
+
+export class CameraController {
+    constructor(viewer) {
+        this.viewer = viewer;
+        this.aircraft = null; 
+        
+        // FLIGHT 模式相机控制相关
+        this.isUserControlling = false;
+        this.userCameraOffset = { heading: 0, pitch: 0, distance: 50 };
+        this.defaultCameraOffset = { heading: 0, pitch: 0, distance: 10, height: 2 };
+        this.resetTimer = null;
+        this.resetDelay = 2000; // 2秒无操作后自动回正
+        this.isResetting = false;
+        this.resetDuration = 1000; // 回正动画时长(毫秒)
+        this.resetStartTime = null;
+        this.resetStartOffset = null;
+        
+        // 鼠标拖拽状态
+        this.isDragging = false;
+        this.lastMousePosition = null;
+        
+        this._setupFlightModeControls();
+        this.exitGlobalView();
+    }
+
+    setTarget(aircraftInstance) {
+        this.aircraft = aircraftInstance;
+    }
+
+    _setupFlightModeControls() {
+        // 使用 Cesium 的 ScreenSpaceEventHandler
+        this.handler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
+        
+        // 左键按下
+        this.handler.setInputAction((movement) => {
+            this.isDragging = true;
+            this.lastMousePosition = { 
+                x: movement.position.x, 
+                y: movement.position.y 
+            };
+            this.isUserControlling = true;
+            this._clearResetTimer();
+            this.isResetting = false;
+        }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+        
+        // 鼠标移动
+        this.handler.setInputAction((movement) => {
+            if (!this.isDragging || !this.lastMousePosition) return;
+            
+            const deltaX = movement.endPosition.x - this.lastMousePosition.x;
+            const deltaY = movement.endPosition.y - this.lastMousePosition.y;
+            
+            // 更新相机偏移（增加灵敏度）
+            this.userCameraOffset.heading -= deltaX * 0.01;
+            this.userCameraOffset.pitch += deltaY * 0.01;
+            
+            // 限制俯仰角范围
+            this.userCameraOffset.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.userCameraOffset.pitch));
+            
+            this.lastMousePosition = { 
+                x: movement.endPosition.x, 
+                y: movement.endPosition.y 
+            };
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+        
+        // 左键松开
+        this.handler.setInputAction(() => {
+            if (this.isDragging) {
+                this.isDragging = false;
+                this.lastMousePosition = null;
+                this._startResetTimer();
+            }
+        }, Cesium.ScreenSpaceEventType.LEFT_UP);
+        
+        // 滚轮缩放 - 不触发回正
+        this.handler.setInputAction((wheelDelta) => {
+            // wheelDelta 是正数表示向上滚，负数表示向下滚
+            this.userCameraOffset.distance += wheelDelta * -0.08;
+            this.userCameraOffset.distance = Math.max(20, Math.min(200, this.userCameraOffset.distance));
+        }, Cesium.ScreenSpaceEventType.WHEEL);
+    }
+
+    _startResetTimer() {
+        this._clearResetTimer();
+        this.resetTimer = setTimeout(() => {
+            this._startResetAnimation();
+        }, this.resetDelay);
+    }
+
+    _clearResetTimer() {
+        if (this.resetTimer) {
+            clearTimeout(this.resetTimer);
+            this.resetTimer = null;
+        }
+    }
+
+    _startResetAnimation() {
+        this.isResetting = true;
+        this.resetStartTime = Date.now();
+        // 只记录 heading 和 pitch，不包括 distance
+        this.resetStartOffset = { 
+            heading: this.userCameraOffset.heading,
+            pitch: this.userCameraOffset.pitch,
+            distance: this.userCameraOffset.distance // 保持当前距离不变
+        };
+    }
+
+    _updateResetAnimation() {
+        if (!this.isResetting) return;
+        
+        const elapsed = Date.now() - this.resetStartTime;
+        const progress = Math.min(1, elapsed / this.resetDuration);
+        
+        // 使用缓动函数（ease-out）
+        const eased = 1 - Math.pow(1 - progress, 3);
+        
+        // 只插值 heading 和 pitch，距离保持不变
+        this.userCameraOffset.heading = Cesium.Math.lerp(
+            this.resetStartOffset.heading, 
+            this.defaultCameraOffset.heading, 
+            eased
+        );
+        this.userCameraOffset.pitch = Cesium.Math.lerp(
+            this.resetStartOffset.pitch, 
+            this.defaultCameraOffset.pitch, 
+            eased
+        );
+        // distance 不变，保持用户设置的值
+        
+        if (progress >= 1) {
+            this.isResetting = false;
+            this.isUserControlling = false;
+        }
+    }
+
+    animateToGlobalView() {
+        if (!this.aircraft) return;
+
+        this.viewer.camera.cancelFlight();
+
+        const currentAircraftPosition = this.aircraft.state.position;
+        const directionVector = Cesium.Cartesian3.normalize(currentAircraftPosition, new Cesium.Cartesian3());
+        const destinationMagnitude = Cesium.Ellipsoid.WGS84.maximumRadius * 3.0;
+        const destination = Cesium.Cartesian3.multiplyByScalar(directionVector, destinationMagnitude, new Cesium.Cartesian3());
+
+        this.viewer.camera.lookDown(Cesium.Math.toRadians(90.0));
+
+        this.viewer.camera.flyTo({
+            destination: destination,
+            duration: 5.5,
+            complete: () => {
+                this.enterGlobalView();
+            },
+        });
+    }
+
+    enterGlobalView() {
+        this._clearResetTimer();
+        this.isResetting = false;
+        this.isDragging = false;
+        
+        // 在全局视图模式下，禁用自定义 handler
+        if (this.handler) {
+            this.handler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOWN);
+            this.handler.removeInputAction(Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+            this.handler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_UP);
+            this.handler.removeInputAction(Cesium.ScreenSpaceEventType.WHEEL);
+        }
+        
+        this.viewer.scene.screenSpaceCameraController.enableRotate = true;
+        this.viewer.scene.screenSpaceCameraController.enableTranslate = false;
+        this.viewer.scene.screenSpaceCameraController.enableZoom = true;
+        this.viewer.scene.screenSpaceCameraController.enableTilt = false;
+        this.viewer.scene.screenSpaceCameraController.enableLook = true;
+    }
+
+    exitGlobalView() {
+        this.viewer.camera.cancelFlight();
+        
+        // 重置用户相机偏移（但保留用户调整的距离）
+        const currentDistance = this.userCameraOffset.distance;
+        this.userCameraOffset = { ...this.defaultCameraOffset };
+        this.userCameraOffset.distance = currentDistance; // 保留用户设置的距离
+        
+        this.isUserControlling = false;
+        this.isResetting = false;
+        this.isDragging = false;
+        this._clearResetTimer();
+        
+        // 重新启用自定义控制
+        this._setupFlightModeControls();
+        
+        this.viewer.scene.screenSpaceCameraController.enableRotate = false;
+        this.viewer.scene.screenSpaceCameraController.enableTranslate = false;
+        this.viewer.scene.screenSpaceCameraController.enableZoom = false;
+        this.viewer.scene.screenSpaceCameraController.enableTilt = false;
+        this.viewer.scene.screenSpaceCameraController.enableLook = false;
+    }
+
+    update() {
+        if (!this.aircraft || !this.aircraft.state) return;
+        
+        // 更新回正动画
+        if (this.isResetting) {
+            this._updateResetAnimation();
+        }
+        
+        const { position, orientation } = this.aircraft.state;
+        
+        // 使用用户控制的偏移量
+        const distance = this.userCameraOffset.distance;
+        const height = this.defaultCameraOffset.height;
+        
+        const rotationMatrix = Cesium.Matrix3.fromQuaternion(orientation);
+        
+        // 应用用户的航向和俯仰偏移
+        const headingOffset = this.userCameraOffset.heading;
+        const pitchOffset = this.userCameraOffset.pitch;
+        
+        // 基础偏移向量（相机在飞机后方）
+        let offset = new Cesium.Cartesian3(-distance, 0, height);
+        
+        // 应用俯仰偏移（绕Y轴旋转）
+        const pitchRotation = Cesium.Matrix3.fromRotationY(pitchOffset);
+        Cesium.Matrix3.multiplyByVector(pitchRotation, offset, offset);
+        
+        // 应用航向偏移（绕Z轴旋转）
+        const headingRotation = Cesium.Matrix3.fromRotationZ(headingOffset);
+        Cesium.Matrix3.multiplyByVector(headingRotation, offset, offset);
+        
+        // 应用飞机姿态
+        const cameraOffset = Cesium.Matrix3.multiplyByVector(rotationMatrix, offset, new Cesium.Cartesian3());
+        const cameraPosition = Cesium.Cartesian3.add(position, cameraOffset, new Cesium.Cartesian3());
+
+        const cameraDirection = Cesium.Cartesian3.normalize(
+            Cesium.Cartesian3.subtract(position, cameraPosition, new Cesium.Cartesian3()),
+            new Cesium.Cartesian3()
+        );
+
+        const cameraUp = Cesium.Matrix3.getColumn(rotationMatrix, 2, new Cesium.Cartesian3());
+
+        this.viewer.camera.setView({
+            destination: cameraPosition,
+            orientation: {
+                direction: cameraDirection,
+                up: cameraUp
+            }
+        });
+    }
+
+    destroy() {
+        this._clearResetTimer();
+        
+        // 清理事件处理器
+        if (this.handler) {
+            this.handler.destroy();
+            this.handler = null;
+        }
+        
+        this.enterGlobalView();
+    }
+}
+
+--- End of File: src/helpers/CameraController.js ---
+
+--- File: src/helpers/FlightSimulator.js ---
+
+// helpers/FlightSimulator.js
+
+import * as Cesium from 'cesium';
+import { InputController } from './InputController';
+import { Aircraft } from './Aircraft';
+import { CameraController } from './CameraController';
+import { AudioManager } from './AudioManager';
+
+class EventEmitter {
+    constructor() { this.events = {}; }
+    on(event, listener) {
+        if (!this.events[event]) this.events[event] = [];
+        this.events[event].push(listener);
+    }
+    emit(event, payload) {
+        if (this.events[event]) {
+            this.events[event].forEach(listener => listener(payload));
+        }
+    }
+}
+
+export class FlightSimulator extends EventEmitter {
+    constructor(viewer, waypointManager = null) {
+        super();
+        this.viewer = viewer;
+        this.isRunning = false;
+        this.viewMode = 'FLIGHT';
+        this.audioUnlocked = false;
+
+        this.inputController = new InputController();
+        this.cameraController = new CameraController(viewer);
+        this.audioManager = new AudioManager();
+        this.waypointManager = waypointManager;
+        
+        this.currentAircraft = null;
+        this.aircraftIcon = null;
+        this._lastTime = null;
+        this._updateLoop = this._updateLoop.bind(this);
+
+        this.terrainProvider = viewer.terrainProvider; // 存储地形提供者以便重用
+
+        this._loadAudioFiles();
+    }
+
+    /**
+     * 为一组 Cartographic 坐标查询并更新其地形高度
+     * @param {Cesium.Cartographic[]} cartographics - 待查询的坐标数组
+     * @returns {Promise<Cesium.Cartographic[]>} - 返回带有精确地形高度的坐标数组
+     */
+    async getUpdatedCartographicsWithTerrainHeight(cartographics) {
+        if (!this.terrainProvider || !Cesium.defined(this.terrainProvider.availability)) {
+            console.warn("Terrain provider not available.");
+            return cartographics;
+        }
+        try {
+            return await Cesium.sampleTerrainMostDetailed(this.terrainProvider, cartographics);
+        } catch (error) {
+            console.error("Error sampling terrain height:", error);
+            return cartographics;
+        }
+    }
+
+    async _loadAudioFiles() {
+        try {
+            await this.audioManager.loadSound('engine', 'assets/engine.wav');
+            await this.audioManager.loadSound('sonic-boom', 'assets/warning.wav');
+            await this.audioManager.loadSound('stall-warning', 'assets/warning.wav');
+            await this.audioManager.loadSound('crash', 'assets/man.wav');
+
+
+            console.log('Audio files loaded successfully');
+            
+            this.emit('audioLoaded');
+        } catch (error) {
+            console.warn('Failed to load some audio files:', error);
+        }
+    }
+
+    setViewMode(mode) {
+        if (this.viewMode === mode) return;
+        this.viewMode = mode;
+        if (mode === 'GLOBAL') {
+            this.currentAircraft.entity.show = false;
+            this.aircraftIcon.show = true;
+            this.cameraController.animateToGlobalView();
+        } else {
+            this.currentAircraft.entity.show = true;
+            this.aircraftIcon.show = false;
+            this.cameraController.exitGlobalView();
+        }
+    }
+
+    async relocateAircraft(groundPosition) {
+        if (!this.currentAircraft) return;
+
+        const cartographic = Cesium.Cartographic.fromCartesian(groundPosition);
+        
+        const [updatedCartographic] = await this.getUpdatedCartographicsWithTerrainHeight([cartographic]);
+        
+        // 设置高度为地形上方1500米
+        updatedCartographic.height += 1500;
+        const newPosition = Cesium.Cartographic.toCartesian(updatedCartographic);
+
+        this.currentAircraft.state.position = newPosition;
+        const hpr = new Cesium.HeadingPitchRoll(this.currentAircraft.state.heading, 0, 0);
+        this.currentAircraft.state.orientation = Cesium.Transforms.headingPitchRollQuaternion(newPosition, hpr);
+        this.currentAircraft.state.speed = 150;
+        this.currentAircraft.state.velocity = new Cesium.Cartesian3(0, 0, 0);
+        this.setViewMode('FLIGHT');
+    }
+
+    loadAircraft(aircraftConfig, position, heading, orientation) {
+        if (this.currentAircraft) {
+            this.currentAircraft.destroy();
+        }
+        if (this.aircraftIcon) {
+            this.viewer.entities.remove(this.aircraftIcon);
+            this.aircraftIcon = null;
+        }
+        this.currentAircraft = new Aircraft(this.viewer, aircraftConfig, position, heading, orientation);
+        this.cameraController.setTarget(this.currentAircraft);
+
+        this.aircraftIcon = this.viewer.entities.add({
+            position: new Cesium.CallbackProperty(() => {
+                if (this.currentAircraft) {
+                    return this.currentAircraft.state.position;
+                }
+            }, false),
+            billboard: {
+                image: aircraftConfig.iconUrl,
+                width: 48,
+                height: 48,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                color: Cesium.Color.WHITE.withAlpha(1.0)
+            },
+            show: (this.viewMode === 'GLOBAL')
+        });
+
+        this.currentAircraft.entity.show = (this.viewMode !== 'GLOBAL');
+    }
+
+    async unlockAudio() {
+        if (this.audioUnlocked) return;
+        const success = await this.audioManager.unlock();
+        if (success) {
+            this.audioUnlocked = true;
+            this.emit('audioUnlocked');
+        }
+    }
+
+    start() {
+        if (this.isRunning) return;
+        this.viewer.scene.preUpdate.addEventListener(this._updateLoop);
+        this.isRunning = true;
+        
+        if (this.audioUnlocked) {
+            this.audioManager.play('engine', { loop: true, volume: 1.0 });
+        }
+    }
+
+    stop() {
+        if (!this.isRunning) return;
+        this.viewer.scene.preUpdate.removeEventListener(this._updateLoop);
+        this.isRunning = false;
+        
+        this.audioManager.stopAll();
+    }
+
+    async _updateLoop() {
+        const deltaTime = this.viewer.clock.multiplier / 60.0;
+        if (!this.currentAircraft) return;
+
+        // 0. 获取地形高度
+        const aircraftCartographic = Cesium.Cartographic.fromCartesian(this.currentAircraft.state.position);
+        const [updatedAircraftCartographic] = await this.getUpdatedCartographicsWithTerrainHeight([aircraftCartographic]);
+        const terrainHeight = updatedAircraftCartographic?.height ?? 0;
+        
+        const prevStatus = { ...this.currentAircraft.state.status };
+
+        // 1. 更新飞机物理，传入地形高度
+        this.currentAircraft.update(this.inputController.controls, deltaTime, terrainHeight);
+
+        // 1.5. 更新航点导航
+        let navData = null;
+        if (this.waypointManager && this.waypointManager.isNavigating) {
+            navData = this.waypointManager.update(this.currentAircraft.state.position);
+        }
+        
+        const currentStatus = this.currentAircraft.state.status;
+        const { speed } = this.currentAircraft.state;
+        const { maxSpeed, stallSpeed } = this.currentAircraft.config.physics;
+
+        // 2. 更新音效
+        this._updateAudio(prevStatus, currentStatus, speed, maxSpeed, stallSpeed);
+
+        // 3. 更新相机 (仅在飞行模式下)
+        if (this.viewMode === 'FLIGHT') {
+            this.cameraController.update();
+        }
+
+        // 4. 发射数据更新事件
+        this.emit('flightDataUpdate', {
+            ...this.currentAircraft.state,
+            navigationData: navData,
+        });
+    }
+
+    _updateAudio(prevStatus, currentStatus, speed, maxSpeed, stallSpeed) {
+        if (currentStatus.isCrashed && !prevStatus.isCrashed) {
+            this.audioManager.stopAll();
+            this.audioManager.playOneShot('crash', { volume: 1.0 });
+            return;
+        }
+
+        if (!currentStatus.isCrashed && prevStatus.isCrashed) {
+            if (this.audioUnlocked) {
+                this.audioManager.play('engine', { loop: true, volume: 1.0 });
+            }
+        }
+
+        if (currentStatus.isCrashed) return;
+
+        if (this.audioUnlocked) {
+            this.audioManager.updateEngineSound(speed, maxSpeed, stallSpeed);
+        }
+
+        if (currentStatus.isStalled && !prevStatus.isStalled) {
+            this.audioManager.play('stall-warning', { loop: true, volume: 0.3 });
+        } else if (!currentStatus.isStalled && prevStatus.isStalled) {
+            this.audioManager.stop('stall-warning');
+        }
+
+        if (currentStatus.isSupersonic && !prevStatus.isSupersonic) {
+            this.audioManager.playOneShot('sonic-boom', { volume: 0.3 });
+        }
+    }
+
+    destroy() {
+        this.stop();
+        this.inputController.destroy();
+        this.cameraController.destroy();
+        this.audioManager.destroy();
+        if (this.currentAircraft) {
+            this.currentAircraft.destroy();
+        }
+        if (this.aircraftIcon) {
+            this.viewer.entities.remove(this.aircraftIcon);
+            this.aircraftIcon = null;
+        }
+    }
+}
+
+--- End of File: src/helpers/FlightSimulator.js ---
+
+--- File: src/helpers/Physics.js ---
+
+// src/helpers/Physics.js
+
+
+/* 
+    这个飞行物理实际上并不怎么样
+    只是一个非常简化的模型，用于演示目的
+    后续有待优化
+*/
+
+
+import * as Cesium from 'cesium';
+
+const GRAVITY = 9.8; // m/s^2
+const MACH_1_SPEED = 343; // 一倍音速 m/s
+
+// 定义一个安全高度阈值，表示飞机模型底部到中心的距离，避免机腹“触地”
+const CRASH_ALTITUDE_THRESHOLD = 2.0; // 2米
+
+export class Physics {
+    
+    /**
+     * 更新飞行器状态
+     * @param {object} aircraftState - 当前飞行器状态
+     * @param {object} controls - 当前控制输入
+     * @param {object} physicsParams - 飞行器的物理参数
+     * @param {number} deltaTime - 时间增量 (秒)
+     * @param {number} terrainHeight - 飞机正下方的地形高度
+     * @returns {object} - 更新后的飞行器状态
+     */
+    static update(aircraftState, controls, physicsParams, deltaTime, terrainHeight) {
+        // 解构当前状态
+        let { position, orientation, speed, throttle, status } = aircraftState;
+        const { maxSpeed, pitchRate, rollRate, yawRate, stallSpeed } = physicsParams;
+
+        // 1. 更新油门和速度
+        throttle = Math.max(0, Math.min(1, throttle + controls.throttle * deltaTime * 0.5));
+        const targetSpeed = throttle * maxSpeed;
+        speed += (targetSpeed - speed) * deltaTime * 0.8;
+
+        // 角速度 -> 增量角
+        const pitchAngle = Cesium.Math.toRadians(controls.pitch * pitchRate) * deltaTime;
+        const rollAngle  = Cesium.Math.toRadians(controls.roll  * rollRate)  * deltaTime;
+        const yawAngle   = Cesium.Math.toRadians(controls.yaw   * yawRate)   * deltaTime;
+
+        // 按“机体坐标系”增量旋转：保持 pitch 为负号（W 抬头）
+        // 去掉 roll/yaw 的负号以符合 A 左滚 / D 右滚、Q 左转 / E 右转的直觉
+        const deltaPitch = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Y, pitchAngle);
+        const deltaRoll  = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_X,  rollAngle);
+        const deltaYaw   = Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Z, -yawAngle);
+
+        // 合并增量（yaw -> pitch -> roll）
+        let deltaRotation = new Cesium.Quaternion();
+        Cesium.Quaternion.multiply(deltaYaw, deltaPitch, deltaRotation);
+        Cesium.Quaternion.multiply(deltaRotation, deltaRoll, deltaRotation);
+
+        // 将增量应用到现有姿态（右乘 = 机体坐标系旋转）
+        Cesium.Quaternion.multiply(orientation, deltaRotation, orientation);
+        Cesium.Quaternion.normalize(orientation, orientation);
+
+
+        // 4. 从新的姿态四元数中获取机体坐标系向量
+        const rotationMatrix = Cesium.Matrix3.fromQuaternion(orientation);
+        const forward = Cesium.Matrix3.getColumn(rotationMatrix, 0, new Cesium.Cartesian3());
+        const right = Cesium.Matrix3.getColumn(rotationMatrix, 1, new Cesium.Cartesian3());
+        const up = Cesium.Matrix3.getColumn(rotationMatrix, 2, new Cesium.Cartesian3());
+
+        // 5. 简化的升力和重力模型
+        // 世界坐标系的上方向 (用于计算重力)
+        const worldUp = Cesium.Cartesian3.normalize(position, new Cesium.Cartesian3());
+
+        const upDot = Math.max(0, Cesium.Cartesian3.dot(up, worldUp)); // 机体“上”与世界“上”的对齐程度
+        const liftFactor = Math.min(1, Math.pow(speed / stallSpeed, 2)); // 升力不超过重力
+        const liftMagnitude = GRAVITY * liftFactor * upDot;
+
+        const liftForce = Cesium.Cartesian3.multiplyByScalar(up, liftMagnitude, new Cesium.Cartesian3());
+        const gravityForce = Cesium.Cartesian3.multiplyByScalar(worldUp, -GRAVITY, new Cesium.Cartesian3());
+
+
+        // 6. 计算最终速度向量并更新位置
+        const thrustForce = Cesium.Cartesian3.multiplyByScalar(forward, speed, new Cesium.Cartesian3());
+        
+        // 将所有力/速度合成
+        let velocity = new Cesium.Cartesian3();
+        Cesium.Cartesian3.add(thrustForce, liftForce, velocity);
+        Cesium.Cartesian3.add(velocity, gravityForce, velocity);
+        
+        const movement = Cesium.Cartesian3.multiplyByScalar(velocity, deltaTime, new Cesium.Cartesian3());
+        position = Cesium.Cartesian3.add(position, movement, new Cesium.Cartesian3());
+        
+        // 7. 基于地形的碰撞检测
+        const cartographic = Cesium.Cartographic.fromCartesian(position);
+        const altitudeAboveGround = cartographic.height - terrainHeight;
+
+        let hasCrashed = false;
+        if (altitudeAboveGround < CRASH_ALTITUDE_THRESHOLD) {
+            hasCrashed = true;
+            // 坠毁后，将飞机位置固定在地形表面上
+            cartographic.height = terrainHeight + CRASH_ALTITUDE_THRESHOLD;
+            position = Cesium.Cartographic.toCartesian(cartographic);
+            speed *= 0.8; // 碰撞后减速
+        }
+        
+        // 8. 更新状态 (音障等)
+        status.isCrashed = hasCrashed;
+        status.isStalled = speed < stallSpeed;
+        status.isSupersonic = speed > MACH_1_SPEED;
+
+        // 9. 从最终的四元数反向计算出HPR，仅用于UI显示
+        // 9. 使用当前位置的 ENU 作为参考系计算 HPR（用于 UI）
+        const enuTransform = Cesium.Transforms.eastNorthUpToFixedFrame(position);
+        const enuRotation = Cesium.Matrix4.getMatrix3(enuTransform, new Cesium.Matrix3());
+        // 正交矩阵的逆 = 转置
+        const enuRotationInv = Cesium.Matrix3.transpose(enuRotation, new Cesium.Matrix3());
+
+        const bodyRotation = Cesium.Matrix3.fromQuaternion(orientation);
+        const localRotation = Cesium.Matrix3.multiply(enuRotationInv, bodyRotation, new Cesium.Matrix3());
+        const localQuat = Cesium.Quaternion.fromRotationMatrix(localRotation);
+
+        const hpr = Cesium.HeadingPitchRoll.fromQuaternion(localQuat);
+
+        
+        // 返回包含全新姿态四元数的新状态对象
+        return {
+            position,
+            velocity,
+            orientation,
+            heading: hpr.heading,
+            pitch: hpr.pitch,
+            roll: hpr.roll,
+            speed,
+            throttle,
+            status,
+        };
+    }
+}
+
+--- End of File: src/helpers/Physics.js ---
+
+--- File: src/helpers/WaypointManager.js ---
+
+// helpers/WaypointManager.js
+
+import * as Cesium from 'cesium';
+import { CoordinateConverter } from './CoordinateConverter';
+
+class EventEmitter {
+    constructor() { this.events = {}; }
+    on(event, listener) {
+        if (!this.events[event]) this.events[event] = [];
+        this.events[event].push(listener);
+    }
+    emit(event, payload) {
+        if (this.events[event]) {
+            this.events[event].forEach(listener => listener(payload));
+        }
+    }
+    off(event, listener) {
+        if (!this.events[event]) return;
+        this.events[event] = this.events[event].filter(l => l !== listener);
+    }
+}
+
+export class WaypointManager extends EventEmitter {
+    constructor(viewer) {
+        super();
+        this.viewer = viewer;
+        this.terrainProvider = viewer.terrainProvider; // 存储地形提供者
+        this.waypoints = [];
+        this.currentWaypointIndex = 0;
+        this.waypointEntities = [];
+        this.pathEntity = null;
+        this.completionRadius = 500;
+        this.isNavigating = false;
+        
+        this.aircraftToFirstWaypointPathEntity = null;
+        this.lastAircraftPosition = null;
+    }
+
+    async _getTerrainHeightForPosition(longitude, latitude) {
+        if (!this.terrainProvider || !Cesium.defined(this.terrainProvider.availability)) {
+            return 0; // 若无地形服务则返回0
+        }
+        const cartographicPosition = Cesium.Cartographic.fromDegrees(longitude, latitude, 0);
+        try {
+            const updatedPositions = await Cesium.sampleTerrainMostDetailed(this.terrainProvider, [cartographicPosition]);
+            return updatedPositions[0]?.height ?? 0;
+        } catch (error) {
+            console.error("Error sampling waypoint terrain height:", error);
+            return 0;
+        }
+    }
+
+    async addWaypoint(longitude, latitude, aglAltitude, name) {
+        const terrainHeight = await this._getTerrainHeightForPosition(longitude, latitude);
+        const absoluteAltitude = terrainHeight + aglAltitude;
+
+        const waypoint = {
+            id: `waypoint_${Date.now()}_${Math.random()}`,
+            name: name || `航点 ${this.waypoints.length + 1}`,
+            position: Cesium.Cartesian3.fromDegrees(longitude, latitude, absoluteAltitude),
+            longitude,
+            latitude,
+            altitude: absoluteAltitude, // 存储绝对高度
+            reached: false,
+            reachedTime: null
+        };
+
+        this.waypoints.push(waypoint);
+        this._createWaypointEntity(waypoint);
+        this._updatePathLine();
+        
+        this.emit('waypointAdded', waypoint);
+        return waypoint;
+    }
+
+    async addWaypointFromLandmark(landmark, altitude = 1000) {
+        // 此处的 'altitude' 被视为对地高度 (AGL)
+        return await this.addWaypoint(
+            landmark.longitude,
+            landmark.latitude,
+            altitude,
+            landmark.name
+        );
+    }
+
+    _createWaypointEntity(waypoint) {
+        const entity = this.viewer.entities.add({
+            id: waypoint.id,
+            position: waypoint.position,
+            ellipsoid: {
+                radii: new Cesium.Cartesian3(this.completionRadius, this.completionRadius, this.completionRadius),
+                material: Cesium.Color.YELLOW.withAlpha(0.2),
+                outline: true,
+                outlineColor: Cesium.Color.YELLOW,
+                stackPartitions: 24,
+                slicePartitions: 24,
+                subdivisions: 64
+            },
+            label: {
+                text: waypoint.name,
+                font: '16px monospace',
+                fillColor: Cesium.Color.YELLOW,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                pixelOffset: new Cesium.Cartesian2(0, -25),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            },
+            point: {
+                pixelSize: 15,
+                color: Cesium.Color.YELLOW,
+                outlineColor: Cesium.Color.WHITE,
+                outlineWidth: 2,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            }
+        });
+        this.waypointEntities.push(entity);
+    }
+
+    _updatePathLine() {
+        if (this.pathEntity) {
+            this.viewer.entities.remove(this.pathEntity);
+            this.pathEntity = null;
+        }
+
+        if (this.waypoints.length < 2) return;
+
+        const positions = this.waypoints.map(wp => wp.position);
+
+        this.pathEntity = this.viewer.entities.add({
+            show: new Cesium.CallbackProperty(() => this.isNavigating, false),
+            polyline: {
+                positions: positions,
+                width: 5,
+                material: new Cesium.PolylineDashMaterialProperty({
+                    color: Cesium.Color.CYAN,
+                    dashLength: 10
+                }),
+                clampToGround: false
+            }
+        });
+    }
+
+    startNavigation() {
+        if (this.waypoints.length === 0) {
+            console.warn('没有设置航点');
+            return false;
+        }
+
+        this.isNavigating = true;
+        this.currentWaypointIndex = 0;
+        
+        this.waypoints.forEach(wp => {
+            wp.reached = false;
+            wp.reachedTime = null;
+            const entity = this.viewer.entities.getById(wp.id);
+            if (entity) {
+                if (entity.ellipsoid) {
+                    entity.ellipsoid.material = Cesium.Color.YELLOW.withAlpha(0.2);
+                    entity.ellipsoid.outlineColor = Cesium.Color.YELLOW;
+                }
+                if (entity.label) entity.label.fillColor = Cesium.Color.YELLOW;
+            }
+        });
+
+        this._createDynamicPathEntities(); 
+
+        this.emit('navigationStarted', {
+            totalWaypoints: this.waypoints.length
+        });
+
+        return true;
+    }
+
+    stopNavigation() {
+        this.isNavigating = false;
+        this._destroyDynamicPathEntities(); 
+        this.emit('navigationStopped');
+    }
+
+    _createDynamicPathEntities() {
+        this._destroyDynamicPathEntities();
+
+        if (!this.isNavigating) return;
+
+        this.aircraftToFirstWaypointPathEntity = this.viewer.entities.add({
+            show: new Cesium.CallbackProperty(() => this.isNavigating, false),
+            polyline: {
+                positions: new Cesium.CallbackProperty(() => {
+                    if (this.isNavigating && this.lastAircraftPosition && this.currentWaypointIndex < this.waypoints.length) {
+                        return [this.lastAircraftPosition, this.waypoints[this.currentWaypointIndex].position];
+                    }
+                    return [];
+                }, false),
+                width: 5,
+                material: new Cesium.PolylineDashMaterialProperty({
+                    color: Cesium.Color.CYAN,
+                    dashLength: 10
+                }),
+                clampToGround: false
+            }
+        });
+    }
+
+    _destroyDynamicPathEntities() {
+        if (this.aircraftToFirstWaypointPathEntity) {
+            this.viewer.entities.remove(this.aircraftToFirstWaypointPathEntity);
+            this.aircraftToFirstWaypointPathEntity = null;
+        }
+    }
+
+    update(aircraftPosition) {
+        this.lastAircraftPosition = aircraftPosition;
+
+        if (!this.isNavigating || this.waypoints.length === 0 || this.currentWaypointIndex >= this.waypoints.length) {
+            return null;
+        }
+        
+        const currentWaypoint = this.waypoints[this.currentWaypointIndex];
+        const distance = Cesium.Cartesian3.distance(aircraftPosition, currentWaypoint.position);
+        
+        const aircraftCarto = Cesium.Cartographic.fromCartesian(aircraftPosition);
+        const bearing = CoordinateConverter.calculateBearing(
+            Cesium.Math.toDegrees(aircraftCarto.longitude),
+            Cesium.Math.toDegrees(aircraftCarto.latitude),
+            currentWaypoint.longitude,
+            currentWaypoint.latitude
+        );
+        
+        const elevationDiff = this._calculateElevationDiff(aircraftPosition, currentWaypoint.position);
+
+        if (distance <= this.completionRadius && !currentWaypoint.reached) {
+            currentWaypoint.reached = true;
+            currentWaypoint.reachedTime = Date.now();
+            
+            const entity = this.viewer.entities.getById(currentWaypoint.id);
+            if (entity) {
+                if (entity.ellipsoid) {
+                    entity.ellipsoid.material = Cesium.Color.LIMEGREEN.withAlpha(0.3);
+                    entity.ellipsoid.outlineColor = Cesium.Color.LIMEGREEN;
+                }
+                if (entity.label) entity.label.fillColor = Cesium.Color.LIMEGREEN;
+            }
+
+            this.emit('waypointReached', {
+                waypoint: currentWaypoint,
+                index: this.currentWaypointIndex,
+                remaining: this.waypoints.length - this.currentWaypointIndex - 1
+            });
+
+            this.currentWaypointIndex++;
+            
+            if (this.currentWaypointIndex >= this.waypoints.length) {
+                this.isNavigating = false;
+                this._destroyDynamicPathEntities();
+                this.emit('navigationCompleted', { totalTime: this._calculateTotalTime() });
+                return null;
+            }
+        }
+
+        return {
+            currentWaypoint: this.waypoints[this.currentWaypointIndex],
+            currentIndex: this.currentWaypointIndex,
+            totalWaypoints: this.waypoints.length,
+            distance,
+            bearing,
+            elevationDiff,
+            eta: this._calculateETA(distance, 200)
+        };
+    }
+
+    _calculateElevationDiff(from, to) {
+        const fromCarto = Cesium.Cartographic.fromCartesian(from);
+        const toCarto = Cesium.Cartographic.fromCartesian(to);
+        return toCarto.height - fromCarto.height;
+    }
+
+    _calculateETA(distance, averageSpeed) {
+        return distance / Math.max(averageSpeed, 1);
+    }
+
+    _calculateTotalTime() {
+        if (this.waypoints.length === 0) return 0;
+        const firstReachedWaypoint = this.waypoints.find(wp => wp.reachedTime !== null);
+        const lastReachedWaypoint = [...this.waypoints].reverse().find(wp => wp.reachedTime !== null);
+        if (!firstReachedWaypoint || !lastReachedWaypoint) return 0;
+        return (lastReachedWaypoint.reachedTime - firstReachedWaypoint.reachedTime) / 1000;
+    }
+
+    clearWaypoints() {
+        this.waypointEntities.forEach(entity => this.viewer.entities.remove(entity));
+        if (this.pathEntity) this.viewer.entities.remove(this.pathEntity);
+        this._destroyDynamicPathEntities(); 
+
+        this.pathEntity = null;
+        this.waypoints = [];
+        this.waypointEntities = [];
+        this.currentWaypointIndex = 0;
+        this.isNavigating = false;
+
+        this.emit('waypointsCleared');
+    }
+
+    removeWaypoint(waypointId) {
+        const index = this.waypoints.findIndex(wp => wp.id === waypointId);
+        if (index === -1) return;
+        const waypoint = this.waypoints[index];
+        const entity = this.viewer.entities.getById(waypointId);
+        if (entity) this.viewer.entities.remove(entity);
+        this.waypointEntities = this.waypointEntities.filter(e => e.id !== waypointId);
+        this.waypoints.splice(index, 1);
+        this._updatePathLine();
+        this.emit('waypointRemoved', waypoint);
+    }
+
+    getWaypoints() {
+        return [...this.waypoints];
+    }
+
+    async loadRoute(route) {
+        this.clearWaypoints();
+        if (route && route.waypoints) {
+            for (const wp of route.waypoints) {
+                await this.addWaypoint(wp.longitude, wp.latitude, wp.altitude, wp.name);
+            }
+        }
+    }
+
+    destroy() {
+        this.clearWaypoints();
+    }
+}
+
+--- End of File: src/helpers/WaypointManager.js ---
+
+--- File: src/helpers/AudioManager.js ---
+
+// src/helpers/AudioManager.js
+
+export class AudioManager {
+    constructor() {
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        this.buffers = {};
+        this.sources = {};
+        this.isEnabled = true;
+        this.masterGain = this.audioContext.createGain(); // 主音量控制器
+        this.masterGain.connect(this.audioContext.destination);
+        this.masterVolume = 0.5;
+        this.masterGain.gain.setValueAtTime(this.masterVolume, this.audioContext.currentTime);
+        this.isUnlocked = false;
+    }
+
+    async unlock() {
+        if (this.isUnlocked) return true;
+        if (this.audioContext.state === 'suspended') {
+            await this.audioContext.resume();
+        }
+        this.isUnlocked = this.audioContext.state === 'running';
+        if (this.isUnlocked) console.log('AudioContext unlocked successfully');
+        return this.isUnlocked;
+    }
+
+    async loadSound(name, url) {
+        try {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+            this.buffers[name] = audioBuffer;
+        } catch (error) {
+            console.error(`Failed to load sound: ${name}`, error);
+            throw error;
+        }
+    }
+
+    play(name, options = {}) {
+        if (!this.isEnabled || !this.buffers[name] || !this.isUnlocked || this.sources[name]) {
+             // 如果已经在播放，则不重复播放
+            return;
+        }
+
+        const source = this.audioContext.createBufferSource();
+        source.buffer = this.buffers[name];
+        source.loop = options.loop || false;
+
+        const gainNode = this.audioContext.createGain();
+        gainNode.gain.setValueAtTime(options.volume ?? 1.0, this.audioContext.currentTime);
+        gainNode.connect(this.masterGain);
+        source.connect(gainNode);
+
+        source.start(0);
+
+        this.sources[name] = { source, gainNode, baseVolume: options.volume ?? 1.0 };
+    }
+
+    stop(name) {
+        if (this.sources[name]) {
+            this.sources[name].source.stop(0);
+            delete this.sources[name];
+        }
+    }
+    
+    // 播放一次性音效
+    playOneShot(name, options = {}) {
+        if (!this.isEnabled || !this.buffers[name] || !this.isUnlocked) return;
+
+        const source = this.audioContext.createBufferSource();
+        source.buffer = this.buffers[name];
+        
+        const gainNode = this.audioContext.createGain();
+        gainNode.gain.setValueAtTime((options.volume ?? 1.0), this.audioContext.currentTime);
+        
+        gainNode.connect(this.masterGain);
+        source.connect(gainNode);
+        source.start(0);
+    }
+
+    updateEngineSound(speed, maxSpeed, stallSpeed) {
+        const engine = this.sources.engine;
+        if (!engine || !this.isUnlocked) return;
+
+        const speedRatio = Math.max(0, Math.min(1, speed / maxSpeed));
+        
+        // 更新音量
+        const volumeFactor = speed < stallSpeed ? 0.3 : 0.5 + speedRatio * 0.5;
+        const targetVolume = engine.baseVolume * volumeFactor;
+        // 使用线性渐变，避免音量突变
+        engine.gainNode.gain.linearRampToValueAtTime(targetVolume, this.audioContext.currentTime + 0.1);
+
+        // 更新播放速率 (音高)
+        const playbackRate = 0.8 + speedRatio * 0.7;
+        engine.source.playbackRate.linearRampToValueAtTime(playbackRate, this.audioContext.currentTime + 0.1);
+    }
+
+    setMasterVolume(volume) {
+        this.masterVolume = Math.max(0, Math.min(1, volume));
+        this.masterGain.gain.setValueAtTime(this.masterVolume, this.audioContext.currentTime);
+    }
+
+    setEnabled(enabled) {
+        this.isEnabled = enabled;
+        if (!enabled) this.stopAll();
+    }
+
+    stopAll() {
+        Object.keys(this.sources).forEach(name => this.stop(name));
+    }
+
+    destroy() {
+        this.stopAll();
+        this.audioContext.close();
+        this.buffers = {};
+    }
+}
+
+--- End of File: src/helpers/AudioManager.js ---
+
+--- File: src/helpers/CoordinateConverter.js ---
+
+// src/helpers/CoordinateConverter.js
+
+import * as Cesium from 'cesium';
+
+/**
+ * 坐标系转换工具
+ * Cesium使用东方为0度 (East = 0°)
+ * 航空导航使用北方为0度 (North = 0°)
+ */
+export class CoordinateConverter {
+    /**
+     * 将航空方位角（北方0度）转换为Cesium航向角（东方0度）
+     * @param {number} bearing - 航空方位角（度）
+     * @returns {number} Cesium航向角（度）
+     */
+    static bearingToCesiumHeading(bearing) {
+        return (bearing + 270 + 360) % 360;
+    }
+
+    /**
+     * 将Cesium航向角（东方0度）转换为航空方位角（北方0度）
+     * @param {number} heading - Cesium航向角（度）
+     * @returns {number} 航空方位角（度）
+     */
+    static cesiumHeadingToBearing(heading) {
+        return (heading + 450) % 360;
+    }
+
+    /**
+     * 计算两点之间的方位角（北方0度，顺时针）
+     * @returns {number} 方位角（度）
+     */
+    static calculateBearing(lon1, lat1, lon2, lat2) {
+        const φ1 = Cesium.Math.toRadians(lat1);
+        const φ2 = Cesium.Math.toRadians(lat2);
+        const Δλ = Cesium.Math.toRadians(lon2 - lon1);
+        const y = Math.sin(Δλ) * Math.cos(φ2);
+        const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+        const θ = Math.atan2(y, x);
+        return (Cesium.Math.toDegrees(θ) + 360) % 360;
+    }
+}
+
+--- End of File: src/helpers/CoordinateConverter.js ---
+
